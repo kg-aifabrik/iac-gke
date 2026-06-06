@@ -14,5 +14,13 @@ venv/
 gha-creds-*.json
 application_default_credentials.json
 
+# Terraform — provider binaries and state are not committed; the lock file IS.
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+crash.log
+*.tfvars.local
+
 # OS / editor
 .DS_Store
