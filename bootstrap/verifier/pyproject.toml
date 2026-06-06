@@ -1,0 +1,49 @@
+# setup-doctor — Python package for verifying the keyless-access setup (FND-2).
+# Dependency versions are constrained here; exact resolved versions are pinned
+# in requirements.lock (committed) for reproducible installs (requirement REL-3).
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "setup-doctor"
+version = "0.1.0"
+description = "Verify keyless GitHub Actions -> Google Cloud setup for cluster-ctrl."
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client>=2.140,<3",
+    "google-auth>=2.30,<3",
+    "google-auth-httplib2>=0.2,<0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.6,<1",
+    "mypy>=1.11,<2",
+]
+
+[project.scripts]
+setup-doctor = "setup_doctor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/setup_doctor"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+files = ["src"]

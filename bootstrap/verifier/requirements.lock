@@ -1,0 +1,34 @@
+# Pinned resolved environment for setup-doctor (runtime + dev).
+# Generated with: pip freeze --exclude-editable
+# Reproducible install: pip install -r requirements.lock
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+cryptography==48.0.0
+google-api-core==2.31.0
+google-api-python-client==2.197.0
+google-auth==2.53.0
+google-auth-httplib2==0.2.1
+googleapis-common-protos==1.75.0
+httplib2==0.31.2
+idna==3.18
+iniconfig==2.3.0
+librt==0.11.0
+mypy==1.20.2
+mypy_extensions==1.1.0
+packaging==26.2
+pathspec==1.1.1
+pluggy==1.6.0
+proto-plus==1.28.0
+protobuf==7.35.0
+pyasn1==0.6.3
+pyasn1_modules==0.4.2
+pycparser==3.0
+Pygments==2.20.0
+pyparsing==3.3.2
+pytest==8.4.2
+requests==2.34.2
+ruff==0.15.16
+typing_extensions==4.15.0
+uritemplate==4.2.0
+urllib3==2.7.0

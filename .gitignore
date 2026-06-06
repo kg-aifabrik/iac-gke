@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local credentials must never be committed (defense in depth; WIF means there
+# are normally none, but guard against accidental key files / ADC dumps).
+*.json.key
+gha-creds-*.json
+application_default_credentials.json
+
+# OS / editor
+.DS_Store
