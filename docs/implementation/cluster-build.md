@@ -32,3 +32,30 @@ Notes:
 - To remove key material later, destroy the key *versions*
   (`gcloud kms keys versions destroy …`) — ~$0.06 per active version per month, $0 once
   destroyed. The key ring/key resources themselves are permanent.
+
+---
+
+## Bootstrap for Terraform builds — `bootstrap/setup-build-foundation.sh`
+
+One-time and human-run (it grants the automation its powers, so the automation can't grant
+them to itself). Idempotent.
+
+- **State bucket** — a versioned Cloud Storage bucket `<project>-tf-state` (uniform access,
+  public access blocked). Each environment's state lives under a prefix (`env/dev`,
+  `env/stage`, …), so one bucket serves the fleet.
+- **Build-role elevation** — raises the Milestone 0 automation identity from its read-only
+  role to a least-privilege **build** set (project-scoped predefined roles, no Owner/Editor):
+  `serviceUsageAdmin` (enable services); `compute.networkAdmin` + `compute.securityAdmin` +
+  `dns.admin` (network, firewall, DNS); `container.admin` (clusters); `cloudkms.admin` (key +
+  key IAM); `iam.serviceAccountAdmin` + `iam.serviceAccountUser` (node identity);
+  `resourcemanager.projectIamAdmin` (grant node/Gateway roles); `artifactregistry.admin`;
+  `binaryauthorization.policyEditor`; `gkehub.admin` (fleet). The superseded read-only role
+  is removed so the set stays exact.
+
+Elevating the identity changes its role set, so the `verify-access` workflow's expected-roles
+value is re-synced to this build set when the bootstrap is run — kept out of that commit so
+the Milestone 0 check isn't tripped before the roles actually change.
+
+## Network — `terraform/modules/network`
+
+*(written next)*
