@@ -12,6 +12,8 @@ import json
 import logging
 import sys
 
+from google.auth import exceptions as auth_exceptions
+
 from . import checks
 from . import clients as clients_mod
 from .config import Config, ConfigError
@@ -32,7 +34,25 @@ def run_checks(clients: clients_mod.Clients, config: Config) -> list[CheckResult
     Order matters for readability: identity and connectivity first (they
     explain later failures), then the structural audits.
     """
-    active_email = clients_mod.resolve_active_identity(clients)
+    # Resolve identity first — this forces a token refresh, so an impersonation
+    # or credential failure surfaces here as one clear FAIL instead of crashing
+    # every subsequent check with a traceback.
+    try:
+        active_email = clients_mod.resolve_active_identity(clients)
+    except auth_exceptions.GoogleAuthError as error:
+        return [
+            CheckResult(
+                "active-identity",
+                Status.FAIL,
+                f"could not obtain credentials for the expected identity: {error}",
+                remediation=(
+                    "confirm the service account has a roles/iam.workloadIdentityUser "
+                    "binding for this repo's principalSet (allow 1-2 minutes for IAM "
+                    "propagation after setup), and that the WIF provider's attribute "
+                    "condition matches this repository_id and ref"
+                ),
+            )
+        ]
     return [
         checks.check_active_identity(active_email, config),
         checks.check_required_apis_enabled(clients.serviceusage, config),
