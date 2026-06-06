@@ -243,7 +243,7 @@ else
   run gcloud iam workload-identity-pools providers create-oidc "${PROVIDER_ID}" \
     --project="${PROJECT_ID}" --location="global" \
     --workload-identity-pool="${POOL_ID}" \
-    --display-name="GitHub OIDC (${REPO})" \
+    --display-name="GitHub OIDC" \
     --issuer-uri="${ISSUER_URI}" \
     --attribute-mapping="${ATTRIBUTE_MAPPING}" \
     --attribute-condition="${ATTRIBUTE_CONDITION}"
