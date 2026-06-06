@@ -95,4 +95,32 @@ sizing/options are inputs (per environment, per purpose).
 
 ## Supply chain — `terraform/modules/supply-chain`
 
+Where cluster images come from, and which images are allowed to run.
+
+- **Two registries** — a private **`app`** repository for the team's own images, and a
+  **remote pull-through proxy** (`docker-remote`) for public Docker Hub images. Workloads
+  reference the proxy instead of `docker.io`, so every public image is fetched once, cached
+  in the project, scanned, and admitted through the same policy — and node pulls need no
+  public egress (they ride Private Google Access). Both are in the cluster's region so pulls
+  stay in-region.
+- **Repository-scoped pull access** — the node service account gets
+  `roles/artifactregistry.reader` on **these two repositories only**, not project-wide. The
+  grant lives in this module (with the repositories it concerns), not in the foundation.
+- **Binary Authorization policy** — one per project, wired to the cluster's
+  `PROJECT_SINGLETON_POLICY_ENFORCE`. It starts in **audit (dry-run)**: `REQUIRE_ATTESTATION`
+  with `DRYRUN_AUDIT_LOG_ONLY`, so the cluster comes up while the policy *logs* what it would
+  deny rather than blocking anything. Our two registries are whitelisted (`admission_whitelist_patterns`),
+  and Google-managed system images are covered by `global_policy_evaluation_mode = ENABLE`,
+  so the eventual enforce flip catches only un-attested third-party images.
+
+Notes:
+- **Flip to enforce** is deliberate and deferred (issue #12): add attestors and set the
+  default rule's `enforcement_mode` to `ENFORCED_BLOCK_AND_AUDIT_LOG`. Done once an
+  image-signing pipeline exists — until then enforce would block everything not whitelisted.
+- **Registry encryption** is left at Google-managed at-rest (the default). Customer-managed
+  (CMEK) encryption of the repositories is a possible later hardening; it needs a third key
+  grant (the Artifact Registry service agent) and isn't required for the cluster to work.
+
+## Access — `terraform/modules/access`
+
 *(written next)*
