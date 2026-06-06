@@ -8,6 +8,8 @@ or raise an ``HttpError``. No network access; no real project.
 
 from __future__ import annotations
 
+import dataclasses
+
 import httplib2
 import pytest
 from googleapiclient.errors import HttpError
@@ -143,6 +145,34 @@ class FakeResourceManager:
         return _Request(self._policy, self._error)
 
 
+class _CryptoKeysNs:
+    def __init__(self, policy: object, error: HttpError | None) -> None:
+        self._policy = policy
+        self._error = error
+
+    def getIamPolicy(self, resource: str) -> _Request:  # noqa: N802 - matches API method name
+        return _Request(self._policy, self._error)
+
+
+class FakeKms:
+    """Fakes ``cloudkms.projects().locations().keyRings().cryptoKeys().getIamPolicy()``."""
+
+    def __init__(self, policy: dict | None = None, error: HttpError | None = None) -> None:
+        self._ck = _CryptoKeysNs(policy if policy is not None else {"bindings": []}, error)
+
+    def projects(self) -> FakeKms:
+        return self
+
+    def locations(self) -> FakeKms:
+        return self
+
+    def keyRings(self) -> FakeKms:  # noqa: N802 - matches API method name
+        return self
+
+    def cryptoKeys(self) -> _CryptoKeysNs:  # noqa: N802 - matches API method name
+        return self._ck
+
+
 @pytest.fixture
 def config() -> Config:
     """A representative Config for the checks under test."""
@@ -155,4 +185,14 @@ def config() -> Config:
         expected_ref="refs/heads/main",
         expected_roles=frozenset({"roles/serviceusage.serviceUsageViewer"}),
         expected_identity_email="cluster-ctrl-automation@example.iam.gserviceaccount.com",
+    )
+
+
+@pytest.fixture
+def cluster_config(config: Config) -> Config:
+    """A Config with cluster mode enabled (a region + node SA configured)."""
+    return dataclasses.replace(
+        config,
+        region="us-central1",
+        node_service_account_email="gke-node@example.iam.gserviceaccount.com",
     )

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import dataclasses
 
-from conftest import FakeIam, FakeResourceManager, FakeServiceUsage, http_error
+from conftest import FakeIam, FakeKms, FakeResourceManager, FakeServiceUsage, http_error
 from setup_doctor import checks
+from setup_doctor.config import CMEK_ROLE
 from setup_doctor.models import Status
 
 # A provider object whose attribute condition correctly pins both repo and ref.
@@ -189,5 +190,167 @@ def test_sa_not_found_fails(config):
 def test_sa_roles_permission_denied_skips(config):
     iam = FakeIam(sa_error=http_error(403))
     result = checks.check_service_account_roles(FakeResourceManager(), iam, config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- CMEK grants (cluster mode) --------------------------------------------
+
+
+def _cmek_policy(config, *, gke: bool, compute: bool) -> dict:
+    bindings = []
+    members = []
+    if gke:
+        members.append(config.gke_service_agent_member)
+    if compute:
+        members.append(config.compute_service_agent_member)
+    if members:
+        bindings.append({"role": CMEK_ROLE, "members": members})
+    return {"bindings": bindings}
+
+
+def test_cmek_grants_both_present_passes(cluster_config):
+    policy = _cmek_policy(cluster_config, gke=True, compute=True)
+    result = checks.check_cmek_grants(FakeKms(policy), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_cmek_grants_missing_compute_fails(cluster_config):
+    policy = _cmek_policy(cluster_config, gke=True, compute=False)
+    result = checks.check_cmek_grants(FakeKms(policy), cluster_config)
+    assert result.status is Status.FAIL
+    assert "Compute" in result.detail
+
+
+def test_cmek_grants_missing_gke_fails(cluster_config):
+    policy = _cmek_policy(cluster_config, gke=False, compute=True)
+    result = checks.check_cmek_grants(FakeKms(policy), cluster_config)
+    assert result.status is Status.FAIL
+    assert "GKE" in result.detail
+
+
+def test_cmek_grants_key_not_found_fails(cluster_config):
+    result = checks.check_cmek_grants(FakeKms(error=http_error(404)), cluster_config)
+    assert result.status is Status.FAIL
+
+
+def test_cmek_grants_permission_denied_skips(cluster_config):
+    result = checks.check_cmek_grants(FakeKms(error=http_error(403)), cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_cmek_grants_not_configured_skips(config):
+    # No region (keyless-only run) -> SKIP without touching the API.
+    result = checks.check_cmek_grants(FakeKms(error=http_error(500)), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- node SA least privilege (cluster mode) --------------------------------
+
+
+def test_node_sa_exact_match_passes(cluster_config):
+    policy = _policy_for(
+        cluster_config.node_service_account_email,
+        ["roles/container.defaultNodeServiceAccount"],
+    )
+    result = checks.check_node_sa_roles(FakeResourceManager(policy), FakeIam(), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_node_sa_extra_role_fails(cluster_config):
+    policy = _policy_for(
+        cluster_config.node_service_account_email,
+        ["roles/container.defaultNodeServiceAccount", "roles/editor"],
+    )
+    result = checks.check_node_sa_roles(FakeResourceManager(policy), FakeIam(), cluster_config)
+    assert result.status is Status.FAIL
+    assert "over-privileged" in result.detail
+    assert "roles/editor" in result.detail
+
+
+def test_node_sa_missing_role_fails(cluster_config):
+    policy = _policy_for(cluster_config.node_service_account_email, [])
+    result = checks.check_node_sa_roles(FakeResourceManager(policy), FakeIam(), cluster_config)
+    assert result.status is Status.FAIL
+    assert "missing" in result.detail
+
+
+def test_node_sa_not_found_fails(cluster_config):
+    iam = FakeIam(sa_error=http_error(404))
+    result = checks.check_node_sa_roles(FakeResourceManager(), iam, cluster_config)
+    assert result.status is Status.FAIL
+
+
+def test_node_sa_permission_denied_skips(cluster_config):
+    iam = FakeIam(sa_error=http_error(403))
+    result = checks.check_node_sa_roles(FakeResourceManager(), iam, cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_node_sa_not_configured_skips(config):
+    result = checks.check_node_sa_roles(FakeResourceManager(), FakeIam(), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- Connect Gateway access (cluster mode) ---------------------------------
+
+
+def test_gateway_access_present_passes(cluster_config):
+    policy = _policy_for(
+        cluster_config.service_account_email,
+        ["roles/gkehub.gatewayEditor", "roles/gkehub.viewer"],
+    )
+    result = checks.check_connect_gateway_access(FakeResourceManager(policy), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_gateway_access_missing_role_fails(cluster_config):
+    policy = _policy_for(cluster_config.service_account_email, ["roles/gkehub.gatewayEditor"])
+    result = checks.check_connect_gateway_access(FakeResourceManager(policy), cluster_config)
+    assert result.status is Status.FAIL
+    assert "gkehub.viewer" in result.detail
+
+
+def test_gateway_access_permission_denied_skips(cluster_config):
+    rm = FakeResourceManager(error=http_error(403))
+    result = checks.check_connect_gateway_access(rm, cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_gateway_access_not_configured_skips(config):
+    result = checks.check_connect_gateway_access(FakeResourceManager(), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- cluster APIs enabled (cluster mode) -----------------------------------
+
+
+def test_cluster_apis_all_enabled_passes(cluster_config):
+    result = checks.check_cluster_apis_enabled(FakeServiceUsage(), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_cluster_apis_missing_one_fails(cluster_config):
+    su = FakeServiceUsage(states={"gkehub.googleapis.com": "DISABLED"})
+    result = checks.check_cluster_apis_enabled(su, cluster_config)
+    assert result.status is Status.FAIL
+    assert "gkehub.googleapis.com" in result.detail
+
+
+def test_cluster_apis_error_fails(cluster_config):
+    result = checks.check_cluster_apis_enabled(
+        FakeServiceUsage(error=http_error(403)), cluster_config
+    )
+    assert result.status is Status.FAIL
+
+
+def test_cluster_apis_not_configured_skips(config):
+    result = checks.check_cluster_apis_enabled(FakeServiceUsage(), config)
     assert result.status is Status.SKIP
     assert result.required is False

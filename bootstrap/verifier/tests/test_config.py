@@ -50,3 +50,38 @@ def test_project_ref_falls_back_to_number(monkeypatch):
     _set_env(monkeypatch, _REQUIRED_ENV)
     config = Config.from_env()
     assert config.project_ref == "projects/123456789012"
+
+
+def test_cluster_mode_off_by_default(monkeypatch):
+    # Without a region, the keyless-only run leaves cluster checks disabled.
+    _set_env(monkeypatch, _REQUIRED_ENV)
+    config = Config.from_env()
+    assert config.region == ""
+    assert config.cluster_checks_enabled is False
+
+
+def test_cluster_mode_enabled_by_region(monkeypatch):
+    _set_env(monkeypatch, _REQUIRED_ENV)
+    monkeypatch.setenv(ENV_PREFIX + "REGION", "us-central1")
+    monkeypatch.setenv(
+        ENV_PREFIX + "NODE_SERVICE_ACCOUNT", "gke-node@example.iam.gserviceaccount.com"
+    )
+    config = Config.from_env()
+    assert config.cluster_checks_enabled is True
+    assert config.node_service_account_email == "gke-node@example.iam.gserviceaccount.com"
+    # Service-agent members are derived from the project number.
+    assert config.gke_service_agent_member == (
+        "serviceAccount:service-123456789012@container-engine-robot.iam.gserviceaccount.com"
+    )
+    assert config.compute_service_agent_member == (
+        "serviceAccount:service-123456789012@compute-system.iam.gserviceaccount.com"
+    )
+    assert config.kms_crypto_key_resource == (
+        "projects/123456789012/locations/us-central1/keyRings/gke-us-central1/cryptoKeys/cluster"
+    )
+
+
+def test_node_sa_roles_default_when_unset(monkeypatch):
+    _set_env(monkeypatch, _REQUIRED_ENV)
+    config = Config.from_env()
+    assert config.expected_node_sa_roles == frozenset({"roles/container.defaultNodeServiceAccount"})

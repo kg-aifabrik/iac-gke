@@ -35,6 +35,7 @@ class Clients:
     iam: Any
     serviceusage: Any
     resourcemanager: Any
+    cloudkms: Any
     session: AuthorizedSession
     credentials: Any
 
@@ -65,11 +66,13 @@ def build_clients() -> Clients:
     resourcemanager = build(
         "cloudresourcemanager", "v3", http=_authorized_http(credentials), cache_discovery=False
     )
+    cloudkms = build("cloudkms", "v1", http=_authorized_http(credentials), cache_discovery=False)
     session = AuthorizedSession(credentials)
     return Clients(
         iam=iam,
         serviceusage=serviceusage,
         resourcemanager=resourcemanager,
+        cloudkms=cloudkms,
         session=session,
         credentials=credentials,
     )

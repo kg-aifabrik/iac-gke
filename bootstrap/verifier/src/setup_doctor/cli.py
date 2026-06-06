@@ -58,6 +58,11 @@ def run_checks(clients: clients_mod.Clients, config: Config) -> list[CheckResult
         checks.check_required_apis_enabled(clients.serviceusage, config),
         checks.check_wif_provider(clients.iam, config),
         checks.check_service_account_roles(clients.resourcemanager, clients.iam, config),
+        # Cluster-setup checks — SKIP unless a region is configured (cluster mode).
+        checks.check_cluster_apis_enabled(clients.serviceusage, config),
+        checks.check_cmek_grants(clients.cloudkms, config),
+        checks.check_node_sa_roles(clients.resourcemanager, clients.iam, config),
+        checks.check_connect_gateway_access(clients.resourcemanager, config),
     ]
 
 

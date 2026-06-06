@@ -19,6 +19,16 @@ It runs with one code path in two places:
 | `wif-provider-scoped` | WIF pool/provider exist; provider pins `repository_id` + `ref` + issuer | SKIP (operator-only read) |
 | `service-account-least-privilege` | The SA holds **exactly** the expected roles (flags extra/missing) | SKIP (operator-only read) |
 
+**Cluster-setup checks** — run only in *cluster mode* (when `SETUP_DOCTOR_REGION` is set);
+otherwise they SKIP, so a keyless-only run is unchanged:
+
+| Check | Verifies | In CI (least-priv SA) |
+|---|---|---|
+| `cluster-apis-enabled` | The cluster/supply-chain APIs are enabled | PASS |
+| `cmek-grants` | **Both** CMEK grants on the cluster key (GKE→secrets, Compute→disks) | SKIP (operator-only read) |
+| `node-sa-least-privilege` | The node SA holds **exactly** its expected project role(s) | SKIP (operator-only read) |
+| `connect-gateway-access` | The automation holds the Connect Gateway roles | SKIP (operator-only read) |
+
 A check returns **PASS**, **FAIL** (setup is wrong — fix it), or **SKIP** (the
 current identity intentionally lacks the read; not a failure). The process exits
 non-zero only on a required FAIL.
@@ -36,6 +46,9 @@ non-zero only on a required FAIL.
 | `SETUP_DOCTOR_EXPECTED_ROLES` | no | Comma-separated exact role set for the SA |
 | `SETUP_DOCTOR_PROJECT_ID` | no | Alphanumeric id (defaults to the number) |
 | `SETUP_DOCTOR_EXPECTED_IDENTITY` | no | If set, the active identity must equal it (CI) |
+| `SETUP_DOCTOR_REGION` | no | Cluster region. **Setting it enables the cluster-setup checks** (and locates the `gke-<region>` KMS key) |
+| `SETUP_DOCTOR_NODE_SERVICE_ACCOUNT` | no | Node SA email whose project roles are audited (cluster mode) |
+| `SETUP_DOCTOR_EXPECTED_NODE_SA_ROLES` | no | Comma-separated exact role set for the node SA (defaults to `roles/container.defaultNodeServiceAccount`) |
 
 ## Use
 

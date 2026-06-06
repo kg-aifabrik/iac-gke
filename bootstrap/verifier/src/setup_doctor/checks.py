@@ -18,7 +18,7 @@ from typing import Any
 
 from googleapiclient.errors import HttpError
 
-from .config import Config
+from .config import CMEK_ROLE, CONNECT_GATEWAY_ROLES, Config
 from .models import CheckResult, Status
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,51 @@ def _http_status(error: HttpError) -> int:
         return int(status)
     resp = getattr(error, "resp", None)
     return int(getattr(resp, "status", 0) or 0)
+
+
+def _roles_in_policy(policy: dict[str, Any], member: str) -> set[str]:
+    """The set of roles a member holds in an IAM policy (pure, no I/O)."""
+    roles = {
+        binding.get("role", "")
+        for binding in policy.get("bindings", [])
+        if member in (binding.get("members") or [])
+    }
+    roles.discard("")
+    return roles
+
+
+def _find_disabled_apis(serviceusage: Any, project_ref: str, apis: tuple[str, ...]) -> list[str]:
+    """Return the subset of ``apis`` not in state ENABLED. May raise HttpError."""
+    disabled: list[str] = []
+    for api in apis:
+        service = (
+            serviceusage.services().get(name=f"{project_ref}/services/{api}").execute(num_retries=3)
+        )
+        if service.get("state") != "ENABLED":
+            disabled.append(api)
+    return disabled
+
+
+def _get_project_iam_policy(resourcemanager: Any, project_ref: str) -> dict[str, Any]:
+    """Fetch the project IAM policy (v3, so conditional bindings survive). May raise HttpError."""
+    result = (
+        resourcemanager.projects()
+        .getIamPolicy(resource=project_ref, body={"options": {"requestedPolicyVersion": 3}})
+        .execute(num_retries=3)
+    )
+    return dict(result)
+
+
+def _skip_if_no_cluster_mode(name: str, config: Config) -> CheckResult | None:
+    """SKIP a cluster-setup check when no region is configured (keyless-only run)."""
+    if not config.cluster_checks_enabled:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "cluster checks not configured (set SETUP_DOCTOR_REGION to enable)",
+            required=False,
+        )
+    return None
 
 
 def check_active_identity(active_email: str, config: Config) -> CheckResult:
@@ -66,13 +111,8 @@ def check_required_apis_enabled(serviceusage: Any, config: Config) -> CheckResul
     means the credential is accepted by a real Google Cloud API end to end.
     """
     name = "required-apis-enabled"
-    not_enabled: list[str] = []
     try:
-        for api in config.required_apis:
-            resource = f"{config.project_ref}/services/{api}"
-            service = serviceusage.services().get(name=resource).execute(num_retries=3)
-            if service.get("state") != "ENABLED":
-                not_enabled.append(api)
+        not_enabled = _find_disabled_apis(serviceusage, config.project_ref, config.required_apis)
     except HttpError as error:
         status = _http_status(error)
         return CheckResult(
@@ -224,12 +264,7 @@ def check_service_account_roles(resourcemanager: Any, iam: Any, config: Config) 
             )
         return CheckResult(name, Status.FAIL, f"error reading the IAM policy (HTTP {status})")
 
-    actual = {
-        binding.get("role", "")
-        for binding in policy.get("bindings", [])
-        if member in (binding.get("members") or [])
-    }
-    actual.discard("")
+    actual = _roles_in_policy(policy, member)
     expected = set(config.expected_roles)
     missing = expected - actual
     extra = actual - expected
@@ -248,4 +283,191 @@ def check_service_account_roles(resourcemanager: Any, iam: Any, config: Config) 
         )
     return CheckResult(
         name, Status.PASS, f"service account holds exactly the expected {len(expected)} role(s)"
+    )
+
+
+# --- Cluster-setup checks (run only when a region is configured) ------------
+
+
+def check_cmek_grants(cloudkms: Any, config: Config) -> CheckResult:
+    """Both CMEK grants exist on the cluster encryption key.
+
+    The GKE service agent must hold the encrypter/decrypter role (application-
+    layer secret/etcd encryption) AND the Compute service agent must hold it
+    (node boot/attached-disk encryption). Missing either breaks the cluster.
+    Reading the key IAM policy is an operator-level permission, so HTTP 403
+    yields ``SKIP``.
+    """
+    name = "cmek-grants"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    try:
+        policy = (
+            cloudkms.projects()
+            .locations()
+            .keyRings()
+            .cryptoKeys()
+            .getIamPolicy(resource=config.kms_crypto_key_resource)
+            .execute(num_retries=3)
+        )
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read the key IAM policy; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                f"cluster encryption key not found ({config.kms_crypto_key_resource})",
+                remediation="apply the foundation root to create the KMS key (see the runbook)",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the key IAM policy (HTTP {status})")
+
+    missing: list[str] = []
+    if CMEK_ROLE not in _roles_in_policy(policy, config.gke_service_agent_member):
+        missing.append("GKE service agent (secret/etcd encryption)")
+    if CMEK_ROLE not in _roles_in_policy(policy, config.compute_service_agent_member):
+        missing.append("Compute service agent (node/disk encryption)")
+    if missing:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "missing CMEK grant for: " + "; ".join(missing),
+            remediation=f"grant {CMEK_ROLE} to the service agent(s) on the cluster key",
+        )
+    return CheckResult(name, Status.PASS, "both CMEK grants present (GKE secrets + Compute disks)")
+
+
+def check_node_sa_roles(resourcemanager: Any, iam: Any, config: Config) -> CheckResult:
+    """The node service account exists and holds EXACTLY its expected project roles.
+
+    Image pull (``roles/artifactregistry.reader``) is granted repository-scoped,
+    not at the project level, so the project policy should show only the node's
+    base role. Extra project roles are an over-privilege violation. Reading the
+    IAM policy is operator-level, so HTTP 403 yields ``SKIP``.
+    """
+    name = "node-sa-least-privilege"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.node_service_account_email:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "node service account not configured (set SETUP_DOCTOR_NODE_SERVICE_ACCOUNT)",
+            required=False,
+        )
+    sa_resource = f"projects/-/serviceAccounts/{config.node_service_account_email}"
+    member = f"serviceAccount:{config.node_service_account_email}"
+    try:
+        iam.projects().serviceAccounts().get(name=sa_resource).execute(num_retries=3)
+        policy = _get_project_iam_policy(resourcemanager, config.project_ref)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read the IAM policy; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                f"node service account {config.node_service_account_email} not found",
+                remediation="apply the foundation root to create the node service account",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the IAM policy (HTTP {status})")
+
+    actual = _roles_in_policy(policy, member)
+    expected = set(config.expected_node_sa_roles)
+    missing = expected - actual
+    extra = actual - expected
+    if missing or extra:
+        parts: list[str] = []
+        if missing:
+            parts.append("missing: " + ", ".join(sorted(missing)))
+        if extra:
+            parts.append("extra (over-privileged): " + ", ".join(sorted(extra)))
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "; ".join(parts),
+            remediation="align the node service account's project roles with the expected set",
+        )
+    return CheckResult(
+        name, Status.PASS, f"node SA holds exactly the expected {len(expected)} role(s)"
+    )
+
+
+def check_connect_gateway_access(resourcemanager: Any, config: Config) -> CheckResult:
+    """The automation can reach the cluster over Connect Gateway.
+
+    Verifies the automation service account holds the gateway roles
+    (``gkehub.gatewayEditor`` + ``gkehub.viewer``) it needs to apply in-cluster
+    resources after a build. (Operator identities are environment-specific and
+    not asserted here.) Reading the IAM policy is operator-level → 403 ``SKIP``.
+    """
+    name = "connect-gateway-access"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    member = f"serviceAccount:{config.service_account_email}"
+    try:
+        policy = _get_project_iam_policy(resourcemanager, config.project_ref)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read the IAM policy; run locally as an operator",
+                required=False,
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the IAM policy (HTTP {status})")
+
+    roles = _roles_in_policy(policy, member)
+    missing = CONNECT_GATEWAY_ROLES - roles
+    if missing:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "automation missing Connect Gateway roles: " + ", ".join(sorted(missing)),
+            remediation="apply the access module so the automation gets the gateway roles",
+        )
+    return CheckResult(name, Status.PASS, "automation has Connect Gateway access")
+
+
+def check_cluster_apis_enabled(serviceusage: Any, config: Config) -> CheckResult:
+    """Every API the cluster and its supply chain need is enabled."""
+    name = "cluster-apis-enabled"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    try:
+        not_enabled = _find_disabled_apis(
+            serviceusage, config.project_ref, config.cluster_required_apis
+        )
+    except HttpError as error:
+        status = _http_status(error)
+        return CheckResult(
+            name,
+            Status.FAIL,
+            f"could not read service state (HTTP {status})",
+            remediation="grant roles/serviceusage.serviceUsageViewer and enable Service Usage",
+        )
+    if not_enabled:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "APIs not enabled: " + ", ".join(not_enabled),
+            remediation="gcloud services enable "
+            + " ".join(not_enabled)
+            + f" --project={config.project_number}",
+        )
+    return CheckResult(
+        name, Status.PASS, f"all {len(config.cluster_required_apis)} cluster APIs enabled"
     )

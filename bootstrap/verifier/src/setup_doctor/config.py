@@ -23,6 +23,36 @@ DEFAULT_REQUIRED_APIS: tuple[str, ...] = (
     "serviceusage.googleapis.com",
 )
 
+# APIs the hardened cluster and its supply chain need (checked only in cluster
+# mode — when a region is configured). Mirrors the project-foundation module.
+DEFAULT_CLUSTER_APIS: tuple[str, ...] = (
+    "container.googleapis.com",
+    "compute.googleapis.com",
+    "cloudkms.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "containeranalysis.googleapis.com",
+    "binaryauthorization.googleapis.com",
+    "gkehub.googleapis.com",
+    "gkeconnect.googleapis.com",
+    "connectgateway.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
+    "secretmanager.googleapis.com",
+    "dns.googleapis.com",
+)
+
+# The role both Google-managed service agents need on the cluster key (one for
+# secret/etcd encryption, one for node/disk encryption).
+CMEK_ROLE = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+# Connect Gateway roles the automation needs to apply in-cluster resources.
+CONNECT_GATEWAY_ROLES: frozenset[str] = frozenset(
+    {"roles/gkehub.gatewayEditor", "roles/gkehub.viewer"}
+)
+
+# Default project-level role for the least-privilege node service account.
+DEFAULT_NODE_SA_ROLES: frozenset[str] = frozenset({"roles/container.defaultNodeServiceAccount"})
+
 GITHUB_ISSUER_URI = "https://token.actions.githubusercontent.com"
 
 # Maps required environment variable (without prefix) -> Config attribute.
@@ -66,6 +96,14 @@ class Config:
             informational.
         issuer_uri: Expected OIDC issuer (defaults to GitHub's).
         required_apis: APIs that must be enabled.
+        region: Cluster region. When set, the cluster-setup checks (CMEK grants,
+            node-SA roles, cluster APIs, Connect Gateway) run; when empty they
+            SKIP, so the keyless-access-only run is unchanged.
+        node_service_account_email: Least-privilege node SA whose project roles
+            are audited (cluster mode).
+        expected_node_sa_roles: Exact project roles the node SA must hold.
+        kms_key_name: Crypto key name in the ``gke-<region>`` key ring.
+        cluster_required_apis: APIs the cluster/supply-chain need (cluster mode).
     """
 
     project_number: str
@@ -79,11 +117,44 @@ class Config:
     expected_identity_email: str = ""
     issuer_uri: str = GITHUB_ISSUER_URI
     required_apis: tuple[str, ...] = DEFAULT_REQUIRED_APIS
+    region: str = ""
+    node_service_account_email: str = ""
+    expected_node_sa_roles: frozenset[str] = DEFAULT_NODE_SA_ROLES
+    kms_key_name: str = "cluster"
+    cluster_required_apis: tuple[str, ...] = DEFAULT_CLUSTER_APIS
 
     @property
     def project_ref(self) -> str:
         """``projects/<id-or-number>`` — Google APIs accept either form."""
         return f"projects/{self.project_id or self.project_number}"
+
+    @property
+    def cluster_checks_enabled(self) -> bool:
+        """Cluster-setup checks run only when a region is configured."""
+        return bool(self.region)
+
+    @property
+    def gke_service_agent_member(self) -> str:
+        """IAM member for the GKE service agent (secret/etcd CMEK grant)."""
+        return (
+            f"serviceAccount:service-{self.project_number}"
+            "@container-engine-robot.iam.gserviceaccount.com"
+        )
+
+    @property
+    def compute_service_agent_member(self) -> str:
+        """IAM member for the Compute service agent (node/disk CMEK grant)."""
+        return (
+            f"serviceAccount:service-{self.project_number}@compute-system.iam.gserviceaccount.com"
+        )
+
+    @property
+    def kms_crypto_key_resource(self) -> str:
+        """Full resource name of the cluster encryption key."""
+        return (
+            f"{self.project_ref}/locations/{self.region}"
+            f"/keyRings/gke-{self.region}/cryptoKeys/{self.kms_key_name}"
+        )
 
     @classmethod
     def from_env(cls) -> Config:
@@ -106,6 +177,13 @@ class Config:
         roles_raw = _env("EXPECTED_ROLES")
         expected_roles = frozenset(r.strip() for r in roles_raw.split(",") if r.strip())
 
+        node_roles_raw = _env("EXPECTED_NODE_SA_ROLES")
+        node_sa_roles = (
+            frozenset(r.strip() for r in node_roles_raw.split(",") if r.strip())
+            if node_roles_raw
+            else DEFAULT_NODE_SA_ROLES
+        )
+
         return cls(
             project_number=values["project_number"],
             pool_id=values["pool_id"],
@@ -117,4 +195,7 @@ class Config:
             project_id=_env("PROJECT_ID"),
             expected_identity_email=_env("EXPECTED_IDENTITY"),
             issuer_uri=_env("ISSUER_URI", GITHUB_ISSUER_URI),
+            region=_env("REGION"),
+            node_service_account_email=_env("NODE_SERVICE_ACCOUNT"),
+            expected_node_sa_roles=node_sa_roles,
         )
