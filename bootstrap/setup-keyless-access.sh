@@ -35,6 +35,7 @@ ISSUER_URI="https://token.actions.githubusercontent.com"
 
 PROJECT_INPUT=""
 REPO=""
+ACCOUNT=""
 ASSUME_YES="false"
 DRY_RUN="false"
 SKIP_VERIFY="false"
@@ -60,6 +61,7 @@ Sets up keyless GitHub Actions -> Google Cloud access and verifies it.
 Options:
   --project ID_OR_NUMBER   Target Google Cloud project (prompted if omitted).
   --repo OWNER/REPO        GitHub repo to trust (default: the current checkout).
+  --account EMAIL          gcloud account to use (overrides the active one for this run).
   --pool-id ID             Workload Identity Pool id (default: github).
   --provider-id ID         OIDC provider id (default: iac-gke).
   --sa-name NAME           Automation service account name (default: cluster-ctrl-automation).
@@ -84,6 +86,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --project)     PROJECT_INPUT="${2:?--project needs a value}"; shift 2 ;;
     --repo)        REPO="${2:?--repo needs a value}"; shift 2 ;;
+    --account)     ACCOUNT="${2:?--account needs a value}"; shift 2 ;;
     --pool-id)     POOL_ID="${2:?}"; shift 2 ;;
     --provider-id) PROVIDER_ID="${2:?}"; shift 2 ;;
     --sa-name)     SA_NAME="${2:?}"; shift 2 ;;
@@ -121,9 +124,12 @@ run_quiet() {
 # ---------------------------------------------------------------------------
 command -v gcloud >/dev/null 2>&1 || die "gcloud is not installed (https://cloud.google.com/sdk)"
 command -v gh >/dev/null 2>&1 || die "gh (GitHub CLI) is not installed (https://cli.github.com)"
+# --account overrides the active gcloud account for every gcloud call in this run.
+[[ -n "${ACCOUNT}" ]] && export CLOUDSDK_CORE_ACCOUNT="${ACCOUNT}"
 gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . \
-  || die "no active gcloud account; run: gcloud auth login"
+  || die "no active gcloud account; run: gcloud auth login (or pass --account EMAIL)"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated; run: gh auth login"
+ACTIVE_ACCOUNT="$(gcloud config get-value account 2>/dev/null || true)"
 
 # A single, fully-qualified ref only — no wildcards that would widen the trust.
 [[ "${REF}" =~ ^refs/(heads|tags)/[^[:space:]*]+$ ]] \
@@ -171,6 +177,7 @@ plan_label=""
 cat <<EOF
 
 Plan${plan_label}:
+  Active account : ${ACTIVE_ACCOUNT}
   Project        : ${PROJECT_ID} (${PROJECT_NUMBER})
   Repository     : ${REPO} (repository_id ${REPOSITORY_ID})
   Pool/Provider  : ${POOL_ID} / ${PROVIDER_ID}
