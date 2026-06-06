@@ -23,6 +23,32 @@ locals {
     cluster     = local.cluster_name
     managed-by  = "cluster-ctrl"
   }, var.extra_labels)
+
+  # A CMEK-encrypted persistent-disk StorageClass — the platform default for
+  # encrypted volumes (the Compute service agent already holds the key grant).
+  # Not marked the cluster default to avoid duelling with GKE's standard-rwo;
+  # workloads request it by name. Rendered (not a kubernetes_* resource) and
+  # applied by the pipeline with kubectl, like the access RBAC.
+  storageclass_manifest = yamlencode({
+    apiVersion = "storage.k8s.io/v1"
+    kind       = "StorageClass"
+    metadata = {
+      name   = "encrypted-rwo"
+      labels = { "app.kubernetes.io/managed-by" = "cluster-ctrl" }
+    }
+    provisioner = "pd.csi.storage.gke.io"
+    parameters = {
+      type                      = "pd-balanced"
+      "disk-encryption-kms-key" = var.kms_key_id
+    }
+    volumeBindingMode    = "WaitForFirstConsumer"
+    allowVolumeExpansion = true
+    reclaimPolicy        = "Delete"
+  })
+
+  # Everything the pipeline applies in-cluster after a build, as one multi-doc
+  # YAML stream: operator RBAC + the encrypted StorageClass.
+  incluster_manifests = "${module.access.rbac_manifest}\n---\n${local.storageclass_manifest}"
 }
 
 data "google_compute_zones" "available" {

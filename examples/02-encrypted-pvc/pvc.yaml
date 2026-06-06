@@ -1,0 +1,13 @@
+# A volume on the CMEK-encrypted StorageClass the platform ships (encrypted-rwo).
+# Backed by a customer-managed-key-encrypted persistent disk.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+  namespace: examples
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: encrypted-rwo
+  resources:
+    requests:
+      storage: 1Gi

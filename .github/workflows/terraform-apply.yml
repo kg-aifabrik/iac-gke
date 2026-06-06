@@ -94,21 +94,22 @@ jobs:
         run: terraform -chdir="$TF_ROOT" apply -no-color -input=false -lock-timeout=120s tfplan
 
       # The cluster's in-cluster objects are not in Terraform state (the cluster
-      # has no public endpoint; see the access module). Apply the operator RBAC
-      # the stack rendered, over Connect Gateway, once the cluster exists.
-      - name: Apply operator RBAC over Connect Gateway
+      # has no public endpoint; see the access module). Apply the platform
+      # manifests the stack rendered (operator RBAC + encrypted StorageClass)
+      # over Connect Gateway, once the cluster exists.
+      - name: Apply in-cluster platform manifests over Connect Gateway
         if: github.event.inputs.root == 'fop'
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet || true
           cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name)"
-          terraform -chdir="$TF_ROOT" output -raw rbac_manifest > rbac.yaml
+          terraform -chdir="$TF_ROOT" output -raw incluster_manifests > incluster.yaml
           gcloud container fleet memberships get-credentials "$cluster" --project "${TF_VAR_project_id}"
           # Gateway IAM granted in this same apply may need a moment to propagate.
           for attempt in 1 2 3 4 5; do
-            if kubectl apply -f rbac.yaml; then exit 0; fi
-            echo "RBAC apply attempt ${attempt} failed; waiting for gateway IAM to propagate..."
+            if kubectl apply -f incluster.yaml; then exit 0; fi
+            echo "Apply attempt ${attempt} failed; waiting for gateway IAM to propagate..."
             sleep 15
           done
-          echo "::error::Failed to apply operator RBAC after retries" && exit 1
+          echo "::error::Failed to apply in-cluster manifests after retries" && exit 1

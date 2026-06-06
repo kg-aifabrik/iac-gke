@@ -1,0 +1,10 @@
+# The page the web server returns. Kept tiny so the end-to-end assertion can
+# check the exact body ("Hello World") a client receives.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-web-html
+  namespace: examples
+data:
+  index.html: |
+    Hello World

@@ -26,8 +26,8 @@ output "proxy_repository_url" {
 }
 
 # The pipeline writes this to a file and applies it with kubectl over Connect
-# Gateway once the cluster is reachable.
-output "rbac_manifest" {
-  description = "Operator ClusterRoleBinding (YAML) to apply post-build."
-  value       = module.stack.rbac_manifest
+# Gateway once the cluster is reachable (operator RBAC + encrypted StorageClass).
+output "incluster_manifests" {
+  description = "In-cluster platform manifests (YAML) to apply post-build."
+  value       = module.stack.incluster_manifests
 }

@@ -1,0 +1,41 @@
+# Pulls an image through the Artifact Registry Docker Hub proxy and runs it.
+# Proves two things at once: the node service account can pull from Artifact
+# Registry (repository-scoped reader), and Binary Authorization admits the image
+# (audit/dry-run for now — it logs, does not block).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: registry-pull
+  namespace: examples
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: registry-pull
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pull
+          image: ${REGISTRY_PROXY}/library/busybox:1.36
+          command:
+            - sh
+            - -c
+            - "echo 'pulled via Artifact Registry proxy and admitted by Binary Authorization (audit): OK'"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

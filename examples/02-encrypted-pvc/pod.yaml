@@ -1,0 +1,39 @@
+# Mounts the encrypted volume. The validation writes a marker, recreates the
+# pod, and reads it back to prove the volume mounts and persists across pods.
+# Non-root with an fsGroup so the mounted disk is writable without root.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-writer
+  namespace: examples
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: ${REGISTRY_PROXY}/library/busybox:1.36
+      command: ["sh", "-c", "echo ready; sleep 3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: data

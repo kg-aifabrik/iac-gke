@@ -1,0 +1,13 @@
+# ClusterIP service — reached from inside the cluster (the cluster is private;
+# no public load balancer is created for this smoke test).
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-web
+  namespace: examples
+spec:
+  selector:
+    app: hello-web
+  ports:
+    - port: 80
+      targetPort: 8080

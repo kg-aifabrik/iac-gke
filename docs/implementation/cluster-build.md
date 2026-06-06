@@ -213,9 +213,9 @@ account-specific values from repository variables, so nothing project-specific i
   **plans, then waits on the `dev` GitHub Environment** whose *required reviewers are the SRE
   approver list*; the apply job is blocked until one of them approves. It then applies the
   **saved plan from the same run**, so what is applied is exactly what was approved. For the
-  `fop` root it finishes by applying the operator RBAC manifest over Connect Gateway (with a
-  short retry for IAM propagation). Concurrency serializes applies per root and never cancels
-  one mid-flight.
+  `fop` root it finishes by applying the in-cluster platform manifests over Connect Gateway
+  (with a short retry for IAM propagation). Concurrency serializes applies per root and never
+  cancels one mid-flight.
 - **`terraform-destroy` (gated)** — manually dispatched, requires re-typing the root name to
   confirm, and goes through the same `dev` Environment approval. Tears down the short-lived
   dev cluster after verification. (Destroying `foundation` leaves the KMS key ring/key behind —
@@ -228,3 +228,33 @@ account-specific values from repository variables, so nothing project-specific i
 - Repository variables: `GCP_REGION` (optional; defaults to `us-central1`) and
   `SRE_OPERATOR_MEMBERS` — a JSON array of IAM member strings, e.g.
   `["group:sre@aifabrik.com"]`. The automation member is derived from `WIF_SERVICE_ACCOUNT`.
+
+## In-cluster platform manifests + validation — `examples/`
+
+Some platform pieces are *in-cluster* objects, not Terraform-managed cluster fields. They
+follow the **Terraform-for-Google, kubectl-for-in-cluster** split (see the access module):
+the stack *renders* them and the apply pipeline applies them over Connect Gateway as one
+multi-doc YAML (`incluster_manifests`):
+
+- **Operator RBAC** — the `ClusterRoleBinding` from the access module.
+- **Encrypted StorageClass (`encrypted-rwo`)** — a CMEK-encrypted persistent-disk class,
+  rendered from the cluster key (the Compute service agent already holds the key grant). It
+  is *not* marked the cluster default (to avoid duelling with GKE's `standard-rwo`);
+  workloads request it by name.
+
+**Validation (`examples/validate.sh`)** proves the cluster is genuinely ready for workloads
+from an end user's point of view (WLD-2), and the examples double as **compliant reference
+deployments** (non-root, read-only root filesystem, dropped capabilities, seccomp
+`RuntimeDefault`, resource limits). It deploys four cases over the gateway and asserts the
+end-to-end outcome, not just that pods start:
+
+| Example | End-to-end assertion |
+|---|---|
+| `hello-web` | a client call returns **HTTP 200** with body **"Hello World"** |
+| `encrypted-pvc` | data **persists** on the encrypted volume across pod recreation |
+| `artifact-registry` | a pull through the proxy is **admitted** (Binary Authorization audit) and runs |
+| `workload-identity` | a pod **reads a Secret Manager secret** via its own Google identity |
+
+Run at bring-up by an operator (it needs operator-level permissions to create the throwaway
+Workload-Identity scaffolding); the summary is pasted into issue #11 as evidence, and the
+runtime acceptance criteria are checked off only once it passes against the real cluster.

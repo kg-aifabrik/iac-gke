@@ -1,0 +1,49 @@
+# A pod that reads a Secret Manager secret using Workload Identity — proving a
+# pod gets its OWN Google identity (not the node's) and least-privilege access
+# to exactly one secret. It prints the secret value, which the validation greps.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wi-secret-reader
+  namespace: examples
+spec:
+  serviceAccountName: wi-demo
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: reader
+      # google/cloud-sdk is on Docker Hub, so it comes through the proxy too.
+      image: ${REGISTRY_PROXY}/google/cloud-sdk:slim
+      command:
+        - sh
+        - -c
+        - "gcloud secrets versions access latest --secret=${SECRET_NAME} --project=${PROJECT_ID}; echo; sleep 3600"
+      env:
+        # gcloud writes its config under $HOME; keep it on a writable emptyDir
+        # so the root filesystem can stay read-only.
+        - name: HOME
+          value: /tmp
+        - name: CLOUDSDK_CONFIG
+          value: /tmp/gcloud
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

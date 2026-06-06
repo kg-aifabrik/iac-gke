@@ -31,7 +31,7 @@ output "gateway_members" {
   value       = module.access.gateway_members
 }
 
-output "rbac_manifest" {
-  description = "ClusterRoleBinding (YAML) the pipeline applies with kubectl after the cluster is reachable."
-  value       = module.access.rbac_manifest
+output "incluster_manifests" {
+  description = "Multi-doc YAML the pipeline applies with kubectl after the cluster is reachable: operator RBAC + the encrypted StorageClass."
+  value       = local.incluster_manifests
 }
