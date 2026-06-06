@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (git-ignored) and fill in, or export TF_VAR_* in CI.
+# The state bucket is also passed at init:
+#   terraform init -backend-config="bucket=<project>-tf-state"
+
+project_id   = "your-dev-project-id"
+region       = "us-central1"
+state_bucket = "your-dev-project-id-tf-state"
+
+# SRE operators (Connect Gateway access + cluster-admin RBAC). Use a Google
+# group once one exists; individual users work too.
+operator_members = ["group:sre@aifabrik.com"]
+
+# The Milestone 0 automation service account (impersonated by CI).
+automation_member = "serviceAccount:auto@your-dev-project-id.iam.gserviceaccount.com"

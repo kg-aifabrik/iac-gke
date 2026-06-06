@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored) and fill in, or export TF_VAR_* in CI.
+# The state bucket is passed at init, not here:
+#   terraform init -backend-config="bucket=<project>-tf-state"
+
+project_id = "your-dev-project-id"
+region     = "us-central1"

@@ -20,7 +20,11 @@ application_default_credentials.json
 *.tfstate.*
 .terraform.tfstate.lock.info
 crash.log
+# Real variable files carry account-specific values (project ids); only the
+# committed *.example templates are tracked.
+*.tfvars
 *.tfvars.local
+!*.tfvars.example
 
 # OS / editor
 .DS_Store

@@ -163,3 +163,39 @@ kubectl get nodes
 
 The automation does the same with the impersonated service account to apply in-cluster
 resources during a build.
+
+## The factory — `modules/cluster-stack` + `envs/`
+
+Building a cluster is **choosing coordinates, not writing code**. The three dimensions —
+**account** (the project), **environment**, **purpose** — map onto the layout:
+
+```
+modules/cluster-stack/    composes network + supply-chain + gke-cluster + access (one purpose)
+envs/dev/foundation/      the per-project foundation (services, KMS, node SA) — applied once
+envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls the stack
+```
+
+- **Why foundation is split out (per project, not per cluster)** — services-enablement, the
+  KMS key ring, the node service account, and project IAM are **project singletons**. If each
+  cluster root created them, a second purpose in the same project would collide on them. So
+  the foundation is its own root, applied once; the per-purpose roots read its outputs via
+  `terraform_remote_state`. Adding `dev/mgmt` later never re-creates a singleton.
+- **`cluster-stack` is the composition** — it takes the coordinates (environment, purpose,
+  sizing) and the foundation's outputs, derives names (`gke-dev-fop`, …) and the **three
+  zones** (the region's first three, unless overridden), stamps consistent
+  `environment/purpose/cluster` labels, and wires the four per-purpose modules. The hardening
+  inside those modules is identical for every cluster; only the inputs differ.
+- **`envs/dev/fop` is thin** — it pins dev-FOP's shape (smallest sizing: one `e2-medium` per
+  zone × 3 zones, general pool only; `REGULAR` channel + a weekend maintenance window; not
+  deletion-protected because dev is torn down) and supplies only account/identity values.
+  **Adding a purpose** = a sibling folder like this one with a different `purpose` and sizing.
+- **Account stays out of git** — the state-bucket name and project id are supplied at
+  `init`/apply (`-backend-config`, `terraform.tfvars` (git-ignored), or `TF_VAR_*`), never
+  committed. Each root keeps its own state under a prefix: `env/dev/foundation`, `env/dev/fop`.
+
+State backend (per root):
+
+```bash
+terraform -chdir=terraform/envs/dev/foundation init -backend-config="bucket=<project>-tf-state"
+terraform -chdir=terraform/envs/dev/fop        init -backend-config="bucket=<project>-tf-state"
+```
