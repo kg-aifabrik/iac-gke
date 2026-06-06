@@ -114,11 +114,11 @@ standards (§6), and links to this plan.
   - [ ] Unit tests (mocked) cover pass + each failure; `ruff`/`mypy` clean; runs locally and in CI.
 
 ### Issue 9 — `examples/` and post-build validation (end-user)
-- **Goal:** prove the cluster is genuinely ready for workloads (WLD-2).
+- **Goal:** prove the cluster is genuinely ready for workloads (WLD-2), from an end user's point of view.
 - **Acceptance:**
-  - [ ] `examples/` at the repo root with workload test cases: a non-root Deployment + Service; a PersistentVolumeClaim on the encrypted storage class; an image pulled from Artifact Registry (passing Binary Auth audit); a pod using Workload Identity to read a Secret Manager secret.
-  - [ ] Each is deployed to the built dev cluster over Connect Gateway and verified to come up correctly.
-  - [ ] Results recorded as part of the milestone's post-build verification.
+  - [ ] `examples/` at the repo root holds runnable workload test cases, kept as references for future use: a non-root Deployment + Service that returns a real response (e.g. "Hello World"); a PersistentVolumeClaim on the encrypted storage class; an image pulled from Artifact Registry (passing Binary Auth audit); a pod using Workload Identity to read a Secret Manager secret.
+  - [ ] Each is deployed to the built dev cluster over Connect Gateway and verified **end to end** — e.g. a client call to the service returns **HTTP 200** with the expected body; the volume mounts and persists; the secret is read.
+  - [ ] Test results are documented in the issue for future reference.
 
 ## 6. Cross-cutting requirements
 
