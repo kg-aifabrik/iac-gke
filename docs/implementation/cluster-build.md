@@ -133,12 +133,23 @@ from one identity list so they can't drift apart:
   (SRE operate every cluster in the project); tightening to a per-membership grant is a later
   least-privilege step.
 - **Kubernetes RBAC (what may I do once in?)** — the gateway authenticates a Google identity
-  and presents it to the cluster as a Kubernetes **User** named by its email (a Google
-  service account included — it maps to a User, not a Kubernetes ServiceAccount; only Google
-  Groups map to `Group`). A `ClusterRoleBinding` binds those subjects to `cluster-admin` to
-  start; namespace-scoped roles arrive with the namespace-stamp milestone. The binding is
-  applied through the Kubernetes provider the env root configures against this cluster's
-  gateway endpoint — the module declares the provider but never configures it.
+  and presents it to the cluster as a Kubernetes **User** named by its email (only Google
+  Groups map to `Group`). A `ClusterRoleBinding` binds the **operators** to `cluster-admin` to
+  start (namespace-scoped roles arrive with the namespace-stamp milestone). The automation is
+  deliberately *not* in the binding — it already authorizes as cluster-admin through GKE's IAM
+  authorizer because it holds `roles/container.admin`, which is also why it can apply this
+  binding in the first place.
+
+**Why the RBAC is a rendered manifest, not a Terraform `kubernetes` resource:** the cluster
+has no public endpoint, so a `kubernetes` provider pointed at it cannot connect *at plan
+time on the first run* — the cluster doesn't exist yet — which would break the approval
+gate's `plan`. Managing in-cluster objects in the same state as the cluster that hosts them
+is a known footgun. So Terraform manages only Google Cloud resources (clean plan), and the
+module **renders the `ClusterRoleBinding` as a YAML output** from the same identity list it
+uses for the IAM grants (one source of truth). The pipeline writes that output to a file and
+`kubectl apply`s it over the gateway after the cluster is up. Every in-cluster object
+(this binding, the default-deny network policy, the examples) follows the same
+Terraform-for-Google, kubectl-for-in-cluster split.
 
 **How an operator connects:**
 

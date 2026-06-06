@@ -2,9 +2,11 @@
 #
 # The control plane has no public endpoint, so the only way in is the fleet's
 # Connect Gateway. Reaching the cluster takes two grants that must agree:
-#   1. Google IAM — permission to use Connect Gateway and read the membership.
+#   1. Google IAM — permission to use Connect Gateway and read the membership
+#      (this module's resources).
 #   2. Kubernetes RBAC — the identity (mapped by the gateway to its email) is
-#      bound to a ClusterRole, or it can authenticate but do nothing.
+#      bound to a ClusterRole, or it can authenticate but do nothing (this
+#      module's rendered manifest output, applied by the pipeline with kubectl).
 # Both are derived from the same identity list so they can't drift apart.
 # See docs/implementation/cluster-build.md for "how an operator connects".
 
@@ -15,11 +17,12 @@ locals {
   gateway_members = concat(var.operator_members, [var.automation_member])
 
   # The gateway authenticates a Google identity and presents it to the cluster
-  # as a Kubernetes user named by its email — a Google service account included
-  # (it maps to a User, not a Kubernetes ServiceAccount). Strip the IAM prefix
-  # to get the RBAC subject; only Google Groups map to kind Group.
+  # as a Kubernetes user named by its email; only Google Groups map to Group.
+  # RBAC binds the operators only — the automation is already cluster-admin via
+  # the GKE IAM authorizer (it holds roles/container.admin), so binding it again
+  # would be redundant.
   rbac_subjects = [
-    for m in local.gateway_members : {
+    for m in var.operator_members : {
       kind = startswith(m, "group:") ? "Group" : "User"
       name = regex("^[^:]+:(.*)$", m)[0]
     }
@@ -44,30 +47,4 @@ resource "google_project_iam_member" "fleet_viewer" {
   project  = var.project_id
   role     = "roles/gkehub.viewer"
   member   = each.value
-}
-
-# --- Kubernetes side: RBAC --------------------------------------------------
-
-# Bind the same identities to a ClusterRole so they can actually act once the
-# gateway lets them in. Applied through the kubernetes provider the env root
-# configures against this cluster's gateway endpoint.
-resource "kubernetes_cluster_role_binding" "operators" {
-  metadata {
-    name = var.binding_name
-  }
-
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = var.cluster_role
-  }
-
-  dynamic "subject" {
-    for_each = local.rbac_subjects
-    content {
-      kind      = subject.value.kind
-      name      = subject.value.name
-      api_group = "rbac.authorization.k8s.io"
-    }
-  }
 }
