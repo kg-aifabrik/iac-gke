@@ -199,3 +199,32 @@ State backend (per root):
 terraform -chdir=terraform/envs/dev/foundation init -backend-config="bucket=<project>-tf-state"
 terraform -chdir=terraform/envs/dev/fop        init -backend-config="bucket=<project>-tf-state"
 ```
+
+## The pipeline — `.github/workflows/terraform-{plan,apply,destroy}.yml`
+
+A change to a cluster is a reviewed change, never a console click. All three workflows
+authenticate **keyless** (Workload Identity Federation — no stored keys) and read
+account-specific values from repository variables, so nothing project-specific is in git.
+
+- **`terraform-plan` (preview)** — runs on every PR touching `terraform/`. It plans both dev
+  roots and **posts the plan to the PR** (one collapsible, self-updating comment per root) and
+  uploads the saved plan as an artifact. This is the reviewer's diff.
+- **`terraform-apply` (gated, saved plan)** — manually dispatched for one root. The run
+  **plans, then waits on the `dev` GitHub Environment** whose *required reviewers are the SRE
+  approver list*; the apply job is blocked until one of them approves. It then applies the
+  **saved plan from the same run**, so what is applied is exactly what was approved. For the
+  `fop` root it finishes by applying the operator RBAC manifest over Connect Gateway (with a
+  short retry for IAM propagation). Concurrency serializes applies per root and never cancels
+  one mid-flight.
+- **`terraform-destroy` (gated)** — manually dispatched, requires re-typing the root name to
+  confirm, and goes through the same `dev` Environment approval. Tears down the short-lived
+  dev cluster after verification. (Destroying `foundation` leaves the KMS key ring/key behind —
+  Cloud KMS forbids deletion — so a later apply reuses them.)
+
+**One-time setup an operator must do** (beyond the Milestone 0 keyless-access runbook):
+
+- A **GitHub Environment named `dev`** with the SRE approvers added as **required reviewers** —
+  this *is* the approval gate. Without it, apply/destroy would run unreviewed.
+- Repository variables: `GCP_REGION` (optional; defaults to `us-central1`) and
+  `SRE_OPERATOR_MEMBERS` — a JSON array of IAM member strings, e.g.
+  `["group:sre@aifabrik.com"]`. The automation member is derived from `WIF_SERVICE_ACCOUNT`.

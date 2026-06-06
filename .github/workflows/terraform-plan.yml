@@ -1,0 +1,108 @@
+# Terraform plan — the pull-request preview.
+#
+# On any PR that touches terraform/, plan every dev root and post the result to
+# the PR so an SRE reviewer sees exactly what would change before approving an
+# apply. Keyless (Workload Identity Federation); no credentials are stored.
+# Project-specific values come from repository variables (set by the keyless-
+# access runbook), so nothing project-specific is hard-coded here.
+
+name: Terraform plan (preview)
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+  workflow_dispatch: {}
+
+# id-token: write is mandatory for WIF. pull-requests: write lets us post the
+# plan as a comment. Everything else stays read-only.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+# One plan per ref at a time; newer pushes supersede in-flight previews.
+concurrency:
+  group: tf-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # foundation is the per-project root; fop is the dev cluster. fop reads
+        # foundation's remote state, so foundation must have been applied once
+        # before a fop plan can resolve.
+        root: [foundation, fop]
+    env:
+      TF_ROOT: terraform/envs/dev/${{ matrix.root }}
+      TF_IN_AUTOMATION: "true"
+      # Inputs (account-specific values live in repository variables, not git).
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
+      TF_VAR_state_bucket: ${{ vars.GCP_PROJECT_ID }}-tf-state
+      TF_VAR_operator_members: ${{ vars.SRE_OPERATOR_MEMBERS }}
+      TF_VAR_automation_member: serviceAccount:${{ vars.WIF_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (keyless via WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.5"
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+
+      - name: Validate
+        run: terraform -chdir="$TF_ROOT" validate -no-color
+
+      - name: Plan
+        id: plan
+        run: |
+          terraform -chdir="$TF_ROOT" plan -no-color -input=false -lock-timeout=120s -out=tfplan
+          terraform -chdir="$TF_ROOT" show -no-color tfplan > plan.txt
+
+      - name: Upload saved plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-${{ matrix.root }}
+          path: |
+            ${{ env.TF_ROOT }}/tfplan
+            plan.txt
+          retention-days: 5
+
+      - name: Comment plan on the PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const root = process.env.TF_ROOT;
+            let plan = fs.readFileSync('plan.txt', 'utf8');
+            const max = 60000; // keep under GitHub's comment size limit
+            if (plan.length > max) {
+              plan = plan.slice(0, max) + '\n\n... truncated; see the run artifact for the full plan.';
+            }
+            const marker = `<!-- tf-plan:${root} -->`;
+            const body = `${marker}\n### Terraform plan — \`${root}\`\n<details><summary>Show plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }

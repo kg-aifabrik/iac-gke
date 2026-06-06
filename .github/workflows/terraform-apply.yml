@@ -1,0 +1,114 @@
+# Terraform apply — gated, serialized, applies a saved plan.
+#
+# Manually dispatched against one dev root. The run plans first, then waits on
+# the `dev` GitHub Environment whose required reviewers are the SRE approver
+# list — an apply cannot proceed without an explicit human approval. The apply
+# job consumes the *saved* plan from the plan job (same run), so what is applied
+# is exactly what was reviewed. Concurrency serializes applies per root and
+# never cancels one in flight. Keyless (WIF); no stored credentials.
+
+name: Terraform apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      root:
+        description: Which dev root to apply
+        type: choice
+        options: [foundation, fop]
+        default: fop
+
+permissions:
+  contents: read
+  id-token: write
+
+# Serialize applies for a given root; never cancel a running apply (mid-apply
+# cancellation can corrupt state).
+concurrency:
+  group: tf-apply-${{ github.event.inputs.root }}
+  cancel-in-progress: false
+
+env:
+  TF_ROOT: terraform/envs/dev/${{ github.event.inputs.root }}
+  TF_IN_AUTOMATION: "true"
+  TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
+  TF_VAR_state_bucket: ${{ vars.GCP_PROJECT_ID }}-tf-state
+  TF_VAR_operator_members: ${{ vars.SRE_OPERATOR_MEMBERS }}
+  TF_VAR_automation_member: serviceAccount:${{ vars.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud (keyless via WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.5"
+          terraform_wrapper: false
+      - name: Init
+        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+      - name: Plan
+        run: terraform -chdir="$TF_ROOT" plan -no-color -input=false -lock-timeout=120s -out=tfplan
+      - name: Upload saved plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: apply-plan-${{ github.event.inputs.root }}
+          path: ${{ env.TF_ROOT }}/tfplan
+          retention-days: 1
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    # The gate: this environment's required reviewers are the SRE approver list.
+    # The job is held until one of them approves the run.
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud (keyless via WIF)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.5"
+          terraform_wrapper: false
+      - name: Init
+        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+      - name: Download saved plan
+        uses: actions/download-artifact@v4
+        with:
+          name: apply-plan-${{ github.event.inputs.root }}
+          path: ${{ env.TF_ROOT }}
+      - name: Apply the saved plan
+        run: terraform -chdir="$TF_ROOT" apply -no-color -input=false -lock-timeout=120s tfplan
+
+      # The cluster's in-cluster objects are not in Terraform state (the cluster
+      # has no public endpoint; see the access module). Apply the operator RBAC
+      # the stack rendered, over Connect Gateway, once the cluster exists.
+      - name: Apply operator RBAC over Connect Gateway
+        if: github.event.inputs.root == 'fop'
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet || true
+          cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name)"
+          terraform -chdir="$TF_ROOT" output -raw rbac_manifest > rbac.yaml
+          gcloud container fleet memberships get-credentials "$cluster" --project "${TF_VAR_project_id}"
+          # Gateway IAM granted in this same apply may need a moment to propagate.
+          for attempt in 1 2 3 4 5; do
+            if kubectl apply -f rbac.yaml; then exit 0; fi
+            echo "RBAC apply attempt ${attempt} failed; waiting for gateway IAM to propagate..."
+            sleep 15
+          done
+          echo "::error::Failed to apply operator RBAC after retries" && exit 1
