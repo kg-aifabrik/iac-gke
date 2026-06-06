@@ -123,4 +123,32 @@ Notes:
 
 ## Access — `terraform/modules/access`
 
-*(written next)*
+The control plane has no public endpoint, so the only way in is the fleet's **Connect
+Gateway**. Reaching the cluster takes two grants that must agree — the module derives both
+from one identity list so they can't drift apart:
+
+- **Google IAM (can I use the gateway?)** — operators and the automation identity get
+  `roles/gkehub.gatewayEditor` (read-write kubectl through the gateway) and
+  `roles/gkehub.viewer` (resolve which membership to route to). Granted at the project level
+  (SRE operate every cluster in the project); tightening to a per-membership grant is a later
+  least-privilege step.
+- **Kubernetes RBAC (what may I do once in?)** — the gateway authenticates a Google identity
+  and presents it to the cluster as a Kubernetes **User** named by its email (a Google
+  service account included — it maps to a User, not a Kubernetes ServiceAccount; only Google
+  Groups map to `Group`). A `ClusterRoleBinding` binds those subjects to `cluster-admin` to
+  start; namespace-scoped roles arrive with the namespace-stamp milestone. The binding is
+  applied through the Kubernetes provider the env root configures against this cluster's
+  gateway endpoint — the module declares the provider but never configures it.
+
+**How an operator connects:**
+
+```bash
+# One-time: point kubeconfig at the cluster through Connect Gateway (no VPN, no public IP).
+gcloud container fleet memberships get-credentials <cluster-name> --project <project-id>
+
+# Now kubectl is proxied through the gateway, authenticated as your Google identity.
+kubectl get nodes
+```
+
+The automation does the same with the impersonated service account to apply in-cluster
+resources during a build.
