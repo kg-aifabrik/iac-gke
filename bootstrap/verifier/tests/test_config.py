@@ -7,7 +7,7 @@ import pytest
 from setup_doctor.config import ENV_PREFIX, Config, ConfigError
 
 _REQUIRED_ENV = {
-    "PROJECT_NUMBER": "152743400949",
+    "PROJECT_NUMBER": "123456789012",
     "POOL_ID": "github",
     "PROVIDER_ID": "iac-gke",
     "SERVICE_ACCOUNT": "auto@example.iam.gserviceaccount.com",
@@ -25,7 +25,7 @@ def test_from_env_builds_config(monkeypatch):
     _set_env(monkeypatch, _REQUIRED_ENV)
     monkeypatch.setenv(ENV_PREFIX + "EXPECTED_ROLES", "roles/a, roles/b")
     config = Config.from_env()
-    assert config.project_number == "152743400949"
+    assert config.project_number == "123456789012"
     assert config.expected_repository_id == "1260827836"
     assert config.expected_roles == frozenset({"roles/a", "roles/b"})
 
@@ -49,4 +49,4 @@ def test_project_ref_prefers_project_id(monkeypatch):
 def test_project_ref_falls_back_to_number(monkeypatch):
     _set_env(monkeypatch, _REQUIRED_ENV)
     config = Config.from_env()
-    assert config.project_ref == "projects/152743400949"
+    assert config.project_ref == "projects/123456789012"

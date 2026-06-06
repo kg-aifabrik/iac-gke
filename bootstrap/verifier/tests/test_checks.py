@@ -119,6 +119,35 @@ def test_wif_provider_permission_denied_skips(config):
     assert result.required is False
 
 
+def test_wif_provider_or_condition_fails(config):
+    # An OR-joined condition would let any branch of this repo OR any repo on the
+    # right ref authenticate — must be rejected even though both literals appear.
+    provider = dict(
+        GOOD_PROVIDER,
+        attributeCondition=(
+            "assertion.repository_id == '1260827836' || assertion.ref == 'refs/heads/main'"
+        ),
+    )
+    iam = FakeIam(pool=GOOD_POOL, provider=provider)
+    result = checks.check_wif_provider(iam, config)
+    assert result.status is Status.FAIL
+    assert "||" in result.detail
+
+
+def test_wif_provider_superstring_repository_id_fails(config):
+    # A different repo whose id merely contains ours as a substring must not pass.
+    provider = dict(
+        GOOD_PROVIDER,
+        attributeCondition=(
+            "assertion.repository_id == '11260827836' && assertion.ref == 'refs/heads/main'"
+        ),
+    )
+    iam = FakeIam(pool=GOOD_POOL, provider=provider)
+    result = checks.check_wif_provider(iam, config)
+    assert result.status is Status.FAIL
+    assert "repository_id" in result.detail
+
+
 # --- service account least privilege --------------------------------------
 
 

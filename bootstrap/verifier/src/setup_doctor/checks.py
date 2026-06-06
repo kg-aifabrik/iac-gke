@@ -154,10 +154,24 @@ def check_wif_provider(iam: Any, config: Config) -> CheckResult:
         )
 
     condition = provider.get("attributeCondition") or ""
+    # Match whitespace-insensitively and on the QUOTED value, so a longer id/ref
+    # that merely contains the expected one as a substring cannot satisfy the pin
+    # (e.g. '1260827836' must not match a provider pinned to '11260827836').
+    compact = condition.replace(" ", "")
+    if "||" in compact:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "attribute condition uses '||' (too permissive); the pins must be combined with '&&'",
+            remediation="rewrite the provider --attribute-condition to AND the repository_id "
+            "and ref pins (see the runbook)",
+        )
+    repo_clause = f"assertion.repository_id=='{config.expected_repository_id}'"
+    ref_clause = f"assertion.ref=='{config.expected_ref}'"
     missing: list[str] = []
-    if config.expected_repository_id not in condition:
+    if repo_clause not in compact:
         missing.append(f"repository_id == '{config.expected_repository_id}'")
-    if config.expected_ref not in condition:
+    if ref_clause not in compact:
         missing.append(f"ref == '{config.expected_ref}'")
     if missing:
         return CheckResult(

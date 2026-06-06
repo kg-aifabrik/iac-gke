@@ -25,8 +25,10 @@ docs/
 The first slice: prove this repo's automation can reach the dev project with no
 stored credentials, and verify the setup is correct and least-privilege.
 
-1. Follow [`docs/runbooks/01-keyless-access-setup.md`](docs/runbooks/01-keyless-access-setup.md)
-   to perform the one-time setup and publish the repository variables.
-2. Run [`setup-doctor`](bootstrap/verifier/) locally for the full audit.
-3. The **Verify keyless access** workflow demonstrates keyless auth in CI — a
-   green run is the deliverable.
+1. Run [`bootstrap/setup-keyless-access.sh`](bootstrap/setup-keyless-access.sh) — it
+   prompts for inputs, performs the one-time setup idempotently, publishes the
+   repository variables, and runs [`setup-doctor`](bootstrap/verifier/) to verify.
+   (See [`docs/runbooks/01-keyless-access-setup.md`](docs/runbooks/01-keyless-access-setup.md)
+   for the manual steps and the rationale.)
+2. The **Verify keyless access** workflow then demonstrates keyless auth in CI —
+   a green run is the deliverable.

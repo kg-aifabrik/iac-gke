@@ -11,6 +11,11 @@ automation.
 
 > Run each step once, in order. Every command is **idempotent** — re-running the
 > whole runbook is safe and makes no changes if everything is already in place.
+>
+> **Recommended:** run [`bootstrap/setup-keyless-access.sh`](../../bootstrap/setup-keyless-access.sh)
+> instead of copy-pasting. It prompts for the inputs, runs every step below
+> idempotently, publishes the GitHub repository variables, and verifies with
+> `setup-doctor`. The steps below document exactly what the script does.
 
 ---
 
@@ -51,14 +56,15 @@ automation.
 ## Step 0 — Set parameters
 
 ```bash
-# The dev project. 152743400949 is the project NUMBER (gcloud accepts it);
-# we derive the alphanumeric PROJECT_ID from it below.
-export PROJECT_NUMBER="152743400949"
-export PROJECT_ID="$(gcloud projects describe "${PROJECT_NUMBER}" --format='value(projectId)')"
+# Provide your dev project (id or number); everything else is derived.
+read -rp "Google Cloud project (id or number): " PROJECT
+read -r PROJECT_ID PROJECT_NUMBER < <(
+  gcloud projects describe "${PROJECT}" --format='value(projectId, projectNumber)')
 
-export GITHUB_ORG="kg-aifabrik"
-export REPO="kg-aifabrik/iac-gke"
-export REPOSITORY_ID="1260827836"   # immutable GitHub repository_id for ${REPO}
+# Repository details, derived from the checkout — no hard-coded ids.
+export REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+export GITHUB_ORG="${REPO%%/*}"
+export REPOSITORY_ID="$(gh api "repos/${REPO}" --jq .id)"  # immutable; survives rename/transfer
 
 export POOL_ID="github"
 export PROVIDER_ID="iac-gke"
@@ -94,7 +100,7 @@ fi
 # Fully-qualified pool name, used in the principalSet member below.
 export WORKLOAD_IDENTITY_POOL_ID="$(gcloud iam workload-identity-pools describe "${POOL_ID}" \
   --project="${PROJECT_ID}" --location="global" --format='value(name)')"
-# -> projects/152743400949/locations/global/workloadIdentityPools/github
+# -> projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/github
 ```
 
 ## Step 3 — Create the OIDC provider, pinned to this repo and branch (idempotent)

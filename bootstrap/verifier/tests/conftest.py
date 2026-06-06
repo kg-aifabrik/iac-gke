@@ -147,7 +147,7 @@ class FakeResourceManager:
 def config() -> Config:
     """A representative Config for the checks under test."""
     return Config(
-        project_number="152743400949",
+        project_number="123456789012",
         pool_id="github",
         provider_id="iac-gke",
         service_account_email="cluster-ctrl-automation@example.iam.gserviceaccount.com",
