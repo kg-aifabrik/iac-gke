@@ -58,4 +58,20 @@ the Milestone 0 check isn't tripped before the roles actually change.
 
 ## Network — `terraform/modules/network`
 
+- **Custom VPC** — `auto_create_subnetworks = false`; subnets are placed deliberately.
+- **Regional subnet + two secondary ranges** — one subnet (a subnet spans all zones in its
+  region) with `pods` and `services` secondary ranges for the VPC-native (alias-IP) cluster.
+  The Pod range comes from `100.64.0.0/10` (to spare RFC1918 space) and is the dominant
+  consumer; **secondary ranges are immutable after creation**, so they're sized once.
+- **Private Google Access** — on the subnet, so private nodes (no external IP) reach Google
+  APIs and Artifact Registry over Google's internal path — no NAT needed for Google services.
+- **Cloud NAT** — optional (`enable_cloud_nat`, default off); only for workloads needing the
+  public internet. Egress is also gated by the namespace default-deny network policy.
+
+Outputs the network/subnet and the `pods`/`services` range names the cluster's IP
+allocation policy references. (Restricted-VIP private DNS for VPC Service Controls is a
+future hardening, not built here — Private Google Access suffices for the cluster to work.)
+
+## GKE cluster — `terraform/modules/gke-cluster`
+
 *(written next)*
