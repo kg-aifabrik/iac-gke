@@ -74,4 +74,25 @@ future hardening, not built here — Private Google Access suffices for the clus
 
 ## GKE cluster — `terraform/modules/gke-cluster`
 
+One hardened, private, regional cluster + node pools. Hardening is identical everywhere;
+sizing/options are inputs (per environment, per purpose).
+
+- **Regional + explicit pools** — control plane across the region's zones; nodes across the
+  given zones. The default pool is created then removed so every real pool uses our settings.
+- **Private, no public endpoint** — private nodes; the control plane uses the **DNS-based
+  endpoint** with external access off. (DNS-endpoint availability is confirmed on the target
+  GKE version at build — design open item.)
+- **VPC-native + Dataplane V2** — `ADVANCED_DATAPATH` (Cilium); default-deny is applied as
+  in-cluster manifests.
+- **Hardening** — shielded nodes, Container-Optimized OS, Workload Identity (pool + per-node
+  `GKE_METADATA`), secret encryption with our key, node/disk encryption (`boot_disk_kms_key`).
+- **Admission** — Binary Authorization opts into the project policy (audit first, then enforce).
+- **Observability** — system + workload logs; system metrics + **managed Prometheus**.
+- **Other** — Gateway API for ingress; cost-allocation enabled (per-cluster/per-namespace cost);
+  fleet membership (for Connect Gateway); deletion protection; maintenance window in dev.
+- **Node pools** — `general` (e2-medium, on-demand by default); optional `confidential`
+  (memory-encrypting, always on-demand, tainted so only opted-in workloads land there).
+
+## Supply chain — `terraform/modules/supply-chain`
+
 *(written next)*
