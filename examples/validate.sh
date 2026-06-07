@@ -38,6 +38,17 @@ tf_out() { terraform -chdir="${TF_FOP}" output -raw "$1" 2>/dev/null || true; }
 RESULTS=()
 record() { RESULTS+=("$1|$2|$3"); printf '  [%s] %s — %s\n' "$1" "$2" "$3"; }
 
+# Retry a command with backoff — IAM operations on freshly-created identities
+# can 400/404 until the new principal is visible at the granting endpoint.
+retry() {
+  local tries=8 delay=5 attempt=1
+  until "$@"; do
+    if (( attempt >= tries )); then return 1; fi
+    printf '  (retry %d/%d in %ds: %s)\n' "${attempt}" "${tries}" "${delay}" "$*" >&2
+    sleep "${delay}"; attempt=$((attempt + 1))
+  done
+}
+
 # Substitute the manifest placeholders without needing gettext/envsubst.
 render() {
   sed -e "s|\${REGISTRY_PROXY}|${REGISTRY_PROXY}|g" \
@@ -81,11 +92,12 @@ setup_wi_prereqs() {
     printf '%s' "${SECRET_VALUE}" | gcloud secrets versions add "${SECRET_NAME}" --project "${PROJECT_ID}" --data-file=-
   fi
 
-  # Least-privilege: the GSA may read only this one secret.
-  gcloud secrets add-iam-policy-binding "${SECRET_NAME}" --project "${PROJECT_ID}" \
+  # Least-privilege: the GSA may read only this one secret. Retry — a brand-new
+  # SA isn't always visible at the secret-IAM endpoint immediately.
+  retry gcloud secrets add-iam-policy-binding "${SECRET_NAME}" --project "${PROJECT_ID}" \
     --member "serviceAccount:${WI_GSA}" --role roles/secretmanager.secretAccessor >/dev/null
-  # Bind the KSA to the GSA (Workload Identity).
-  gcloud iam service-accounts add-iam-policy-binding "${WI_GSA}" --project "${PROJECT_ID}" \
+  # Bind the KSA to the GSA (Workload Identity). Same propagation lag possible.
+  retry gcloud iam service-accounts add-iam-policy-binding "${WI_GSA}" --project "${PROJECT_ID}" \
     --role roles/iam.workloadIdentityUser \
     --member "serviceAccount:${PROJECT_ID}.svc.id.goog[${NS}/${KSA}]" >/dev/null
 }
