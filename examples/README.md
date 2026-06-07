@@ -24,9 +24,13 @@ script reads its configuration from the `fop` Terraform outputs (override with
 # Prereqs: gcloud, kubectl, the gke-gcloud-auth-plugin, and operator-level
 # project permissions (example 04 creates throwaway Secret Manager / service-
 # account scaffolding).
-examples/validate.sh           # deploy all four, assert, print a summary
-examples/validate.sh --cleanup # tear down the namespace + the WI scaffolding
+examples/validate.sh           # deploy, assert, auto-clean on success
+examples/validate.sh --keep    # as above, but leave state for inspection
+examples/validate.sh --cleanup # standalone teardown (namespace + WI scaffolding)
 ```
+
+On a **FAIL**, state is left behind on purpose so you can inspect with
+`kubectl -n examples get pods,svc,pvc`. Run `--cleanup` afterward.
 
 Images are pulled through the Artifact Registry Docker Hub proxy
 (`${REGISTRY_PROXY}/...`), so the examples exercise the supply chain on every

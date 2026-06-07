@@ -14,8 +14,13 @@
 # unless overridden by environment variables.
 #
 # Usage:
-#   ./validate.sh            # deploy + assert, print a summary
-#   ./validate.sh --cleanup  # tear everything down (namespace + WI scaffolding)
+#   ./validate.sh            # deploy + assert + (on success) auto-clean
+#   ./validate.sh --keep     # as above, but leave resources behind for inspection
+#   ./validate.sh --cleanup  # only tear down (namespace + WI scaffolding)
+#
+# Note: when an assertion FAILS the script intentionally LEAVES state behind so
+# you can poke at it (`kubectl -n examples ...`). Run `./validate.sh --cleanup`
+# afterward to remove it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -183,16 +188,26 @@ check_workload_identity() {
 
 # --- teardown --------------------------------------------------------------
 
-cleanup() {
-  resolve_config
-  connect
-  log "Tearing down"
+# Tear down what setup_wi_prereqs and the examples created. Safe to call when
+# config (cluster connection, project) is already resolved, so we can chain it
+# inside main() without re-fetching kubeconfig.
+do_cleanup() {
+  log "Tearing down examples + WI scaffolding"
   kubectl delete namespace "${NS}" --ignore-not-found --wait=false
   gcloud iam service-accounts delete "${WI_GSA}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
   gcloud secrets delete "${SECRET_NAME}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
+}
+
+# --cleanup mode: just tear down (resolve + connect, then delete).
+cleanup() {
+  resolve_config
+  connect
+  do_cleanup
   log "Done"
 }
 
+# Returns 0 if every recorded result is PASS, non-zero otherwise. Side effect:
+# prints the summary table.
 summary() {
   log "Summary"
   local failed=0
@@ -201,15 +216,20 @@ summary() {
     printf '  %-5s %-20s %s\n' "${status}" "${name}" "${detail}"
     [[ "${status}" == "FAIL" ]] && failed=1
   done
-  if [[ "${failed}" -eq 0 ]]; then
-    log "All examples passed — the cluster is ready for workloads (WLD-2)."
-  else
-    die "one or more examples failed"
-  fi
+  return "${failed}"
 }
 
 main() {
-  if [[ "${1:-}" == "--cleanup" ]]; then cleanup; exit 0; fi
+  # Default: auto-clean on success. --keep leaves state for inspection even on
+  # success; --cleanup is the standalone teardown mode (no checks).
+  local auto_cleanup=1
+  case "${1:-}" in
+    --cleanup) cleanup; exit 0 ;;
+    --keep)    auto_cleanup=0 ;;
+    "")        : ;;
+    *) die "unknown flag: $1 (use --keep or --cleanup)" ;;
+  esac
+
   resolve_config
   connect
   ensure_namespace
@@ -218,7 +238,23 @@ main() {
   check_encrypted_pvc
   check_artifact_registry
   check_workload_identity
-  summary
+
+  if summary; then
+    if (( auto_cleanup )); then
+      do_cleanup
+      log "All examples passed — the cluster is ready for workloads (WLD-2). State cleaned."
+    else
+      log "All examples passed — the cluster is ready for workloads (WLD-2). State left for inspection (--keep)."
+    fi
+    exit 0
+  else
+    # On failure, leave the state alone so an operator can inspect with
+    # `kubectl -n ${NS} ...`. Tell them how to clean up afterward.
+    log "One or more examples FAILED — state left behind for inspection."
+    log "Inspect with: kubectl -n ${NS} get pods,svc,pvc"
+    log "Clean up after with: ${BASH_SOURCE[0]} --cleanup"
+    exit 1
+  fi
 }
 
 main "$@"
