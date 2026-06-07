@@ -65,11 +65,11 @@ jobs:
           SETUP_DOCTOR_PROVIDER_ID: iac-gke
           SETUP_DOCTOR_REPOSITORY_ID: "1260827836" # kg-aifabrik/iac-gke (immutable)
           SETUP_DOCTOR_REF: refs/heads/main
-          # The build-role set granted by bootstrap/setup-build-foundation.sh
-          # (project-scoped; the bucket-scoped storage.objectAdmin is not a
-          # project role and is not listed). After the access module applies at
-          # the fop build, append roles/gkehub.gatewayEditor,roles/gkehub.viewer.
-          SETUP_DOCTOR_EXPECTED_ROLES: roles/serviceusage.serviceUsageAdmin,roles/compute.networkAdmin,roles/compute.securityAdmin,roles/dns.admin,roles/container.admin,roles/cloudkms.admin,roles/iam.serviceAccountAdmin,roles/iam.serviceAccountUser,roles/resourcemanager.projectIamAdmin,roles/artifactregistry.admin,roles/binaryauthorization.policyEditor,roles/gkehub.admin
+          # The build-role set: 12 project roles granted by
+          # bootstrap/setup-build-foundation.sh, plus the two Connect Gateway
+          # roles the access module grants the automation SA at the fop build.
+          # (The bucket-scoped storage.objectAdmin is not a project role.)
+          SETUP_DOCTOR_EXPECTED_ROLES: roles/serviceusage.serviceUsageAdmin,roles/compute.networkAdmin,roles/compute.securityAdmin,roles/dns.admin,roles/container.admin,roles/cloudkms.admin,roles/iam.serviceAccountAdmin,roles/iam.serviceAccountUser,roles/resourcemanager.projectIamAdmin,roles/artifactregistry.admin,roles/binaryauthorization.policyEditor,roles/gkehub.admin,roles/gkehub.gatewayEditor,roles/gkehub.viewer
         # In CI the automation SA is least-privilege, so the operator-only
         # structural checks (WIF provider, SA roles) report SKIP; the identity
         # and live-API checks must PASS. Exit is non-zero only on a real FAIL.
