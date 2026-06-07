@@ -107,11 +107,12 @@ Where cluster images come from, and which images are allowed to run.
   `roles/artifactregistry.reader` on **these two repositories only**, not project-wide. The
   grant lives in this module (with the repositories it concerns), not in the foundation.
 - **Binary Authorization policy** — one per project, wired to the cluster's
-  `PROJECT_SINGLETON_POLICY_ENFORCE`. It starts in **audit (dry-run)**: `REQUIRE_ATTESTATION`
-  with `DRYRUN_AUDIT_LOG_ONLY`, so the cluster comes up while the policy *logs* what it would
-  deny rather than blocking anything. Our two registries are whitelisted (`admission_whitelist_patterns`),
-  and Google-managed system images are covered by `global_policy_evaluation_mode = ENABLE`,
-  so the eventual enforce flip catches only un-attested third-party images.
+  `PROJECT_SINGLETON_POLICY_ENFORCE`. It starts in **audit**: `ALWAYS_ALLOW` with
+  `DRYRUN_AUDIT_LOG_ONLY`, so the cluster comes up and nothing is blocked while the policy
+  resource is in place. (`REQUIRE_ATTESTATION` is invalid until attestors exist — the API
+  rejects an empty `require_attestations_by` — so it can't be the starting posture.) Our two
+  registries are whitelisted (`admission_whitelist_patterns`), and Google-managed system
+  images are covered by `global_policy_evaluation_mode = ENABLE`, ready for the enforce flip.
 
 Notes:
 - **Flip to enforce** is deliberate and deferred (issue #12): add attestors and set the

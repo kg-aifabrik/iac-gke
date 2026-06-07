@@ -88,14 +88,13 @@ resource "google_binary_authorization_policy" "this" {
     name_pattern = "${local.registry_host}/${var.project_id}/${google_artifact_registry_repository.docker_proxy.repository_id}/*"
   }
 
-  # AUDIT stage: require attestation in principle, but only LOG what fails —
-  # block nothing (DRYRUN). With no attestors defined yet, every non-whitelisted
-  # image is logged as "would be denied", which is exactly the signal we want
-  # before enforcing. Issue #12 adds attestors and sets enforcement_mode to
-  # ENFORCED_BLOCK_AND_AUDIT_LOG.
+  # AUDIT stage: admit everything for now (ALWAYS_ALLOW), so the cluster comes up
+  # and nothing is blocked while the policy resource is in place. REQUIRE_ATTESTATION
+  # is invalid until attestors exist — the API rejects an empty require_attestations_by
+  # — so the enforce flip is deferred to #12, which adds attestors and switches to
+  # REQUIRE_ATTESTATION + ENFORCED_BLOCK_AND_AUDIT_LOG.
   default_admission_rule {
-    evaluation_mode         = "REQUIRE_ATTESTATION"
-    enforcement_mode        = "DRYRUN_AUDIT_LOG_ONLY"
-    require_attestations_by = []
+    evaluation_mode  = "ALWAYS_ALLOW"
+    enforcement_mode = "DRYRUN_AUDIT_LOG_ONLY"
   }
 }
