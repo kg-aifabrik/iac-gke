@@ -114,6 +114,16 @@ resource "google_container_cluster" "this" {
     service_account = var.node_service_account_email
     oauth_scopes    = local.oauth_scopes
   }
+
+  # Pools are managed separately (remove_default_node_pool). GKE echoes a pool's
+  # settings (e.g. boot_disk_kms_key) back into the cluster's node_config on
+  # read, which Terraform would otherwise treat as drift on an immutable field
+  # and force a full cluster replacement on every apply. This block only
+  # configures the throwaway default pool at creation, so ignoring later drift
+  # on it is safe.
+  lifecycle {
+    ignore_changes = [node_config]
+  }
 }
 
 # --- General hardened node pool --------------------------------------------
