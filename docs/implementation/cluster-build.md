@@ -201,6 +201,29 @@ terraform -chdir=terraform/envs/dev/foundation init -backend-config="bucket=<pro
 terraform -chdir=terraform/envs/dev/fop        init -backend-config="bucket=<project>-tf-state"
 ```
 
+**Provider dependency locks (`.terraform.lock.hcl`).** The lock pins the exact provider
+versions and checksums for a build; the version *constraints* in code stay deliberately
+wide (`>= 6.0, < 8.0`), and the lock is what actually freezes a build at a known-good
+version. Two rules keep it trustworthy, learned from a drift that broke a teardown:
+
+- **Roots only, never modules.** A lock is committed only at the env roots
+  (`envs/dev/{foundation,fop}`), where `terraform init` runs. A lock inside a reusable
+  module (`modules/*`) is never consulted by a root's `init` — it only drifts and confuses.
+  `.gitignore` ignores `terraform/modules/**/.terraform.lock.hcl` so a stray `init`/
+  `validate` run inside a module directory cannot recommit one.
+- **Multi-platform.** Each root lock carries checksums for every platform that runs
+  Terraform — `linux_amd64` (CI) and developer Macs (`darwin_amd64`, `darwin_arm64`) —
+  produced with `terraform providers lock -platform=linux_amd64 -platform=darwin_amd64
+  -platform=darwin_arm64`. A lock holding only one platform's hash (e.g. a Mac-generated
+  lock) makes CI either silently re-resolve, losing the pin, or fail outright.
+
+CI enforces both: every workflow's `init` runs with `-lockfile=readonly`, so a lock that is
+missing, single-platform, or stale **fails the run** instead of being rewritten on the
+runner. Updating a lock is therefore a deliberate, committed act — `terraform init -upgrade`
+to move versions within constraints, or `terraform providers lock` to add a platform or
+refresh hashes — done locally (the `init` examples above, without `readonly`) and reviewed
+in the diff.
+
 ## The pipeline — `.github/workflows/terraform-{plan,apply,destroy}.yml`
 
 A change to a cluster is a reviewed change, never a console click. All three workflows

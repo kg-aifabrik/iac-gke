@@ -59,7 +59,8 @@ jobs:
           terraform_version: "1.15.5"
           terraform_wrapper: false
       - name: Init
-        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+        # readonly: use the committed lock as-is; fail on drift (see cluster-build.md).
+        run: terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="bucket=${TF_VAR_state_bucket}"
       # Before destroying, delete the in-cluster Gateways so the GKE Gateway
       # controller releases the Google load-balancer resources it created
       # (forwarding rules, target proxies, backend services, NEGs). Those are not

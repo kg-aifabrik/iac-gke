@@ -63,7 +63,10 @@ jobs:
           terraform_wrapper: false
 
       - name: Init
-        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+        # -lockfile=readonly: build against the committed .terraform.lock.hcl as-is.
+        # If it is missing, incomplete (e.g. no linux_amd64 hash), or out of date, the
+        # run fails rather than silently re-resolving providers. See cluster-build.md.
+        run: terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="bucket=${TF_VAR_state_bucket}"
 
       - name: Validate
         run: terraform -chdir="$TF_ROOT" validate -no-color

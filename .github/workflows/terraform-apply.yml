@@ -54,7 +54,8 @@ jobs:
           terraform_version: "1.15.5"
           terraform_wrapper: false
       - name: Init
-        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+        # readonly: use the committed lock as-is; fail on drift (see cluster-build.md).
+        run: terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="bucket=${TF_VAR_state_bucket}"
       - name: Plan
         run: terraform -chdir="$TF_ROOT" plan -no-color -input=false -lock-timeout=120s -out=tfplan
       - name: Upload saved plan
@@ -84,7 +85,8 @@ jobs:
           terraform_version: "1.15.5"
           terraform_wrapper: false
       - name: Init
-        run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+        # readonly: use the committed lock as-is; fail on drift (see cluster-build.md).
+        run: terraform -chdir="$TF_ROOT" init -input=false -lockfile=readonly -backend-config="bucket=${TF_VAR_state_bucket}"
       - name: Download saved plan
         uses: actions/download-artifact@v4
         with:
