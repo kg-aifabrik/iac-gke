@@ -225,7 +225,7 @@ module "gateway_external" {
   project_id        = var.project_id
   region            = var.region
   gateway_namespace = var.gateway_namespace
-  hostname          = var.external_hostname
+  hostnames         = var.external_hostnames
   labels            = local.labels
 }
 
@@ -238,6 +238,6 @@ module "gateway_internal" {
   region            = var.region
   subnetwork        = module.network.subnetwork_self_link
   gateway_namespace = var.gateway_namespace
-  hostname          = var.internal_hostname
+  hostnames         = var.internal_hostnames
   labels            = local.labels
 }

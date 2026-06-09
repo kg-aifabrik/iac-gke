@@ -229,14 +229,14 @@ variable "extra_labels" {
 
 # --- Ingress (gateways + TLS) ----------------------------------------------
 
-variable "external_hostname" {
-  description = "Public FQDN served by the external gateway (validated for the Certificate Manager managed cert)."
-  type        = string
+variable "external_hostnames" {
+  description = "Public FQDNs served by the external gateway — one managed cert + DNS authorization each, served by SNI (ADR-0005)."
+  type        = list(string)
 }
 
-variable "internal_hostname" {
-  description = "Private FQDN served by the internal gateway (on the CAS-issued cert)."
-  type        = string
+variable "internal_hostnames" {
+  description = "Private FQDNs served by the internal gateway — all SANs on one CAS-issued cert; each gets an A record in the private zone (ADR-0005/0006)."
+  type        = list(string)
 }
 
 variable "proxy_only_cidr" {

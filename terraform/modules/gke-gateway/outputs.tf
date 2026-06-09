@@ -25,19 +25,23 @@ output "route_namespace_label" {
   value       = local.route_label
 }
 
-# The DNS records the operator adds in GoDaddy for the external gateway: the
-# Certificate Manager DNS-authorization CNAME and the hostname A record.
+# The DNS records the operator adds at the registrar for the external gateway,
+# PER HOSTNAME: the Certificate Manager DNS-authorization CNAME (cert
+# validation) and the hostname A record. The opt-in public zone (dns-zones
+# module, ADR-0006) consumes the same structure when it automates them.
 output "dns_records" {
-  description = "External-gateway DNS records to create in the domain registrar (null for internal)."
+  description = "Per-hostname external DNS records to create at the registrar (null for internal): hostname => { dns_authorization CNAME, a_record }."
   value = local.is_external ? {
-    dns_authorization = {
-      name = google_certificate_manager_dns_authorization.external[0].dns_resource_record[0].name
-      type = google_certificate_manager_dns_authorization.external[0].dns_resource_record[0].type
-      data = google_certificate_manager_dns_authorization.external[0].dns_resource_record[0].data
-    }
-    a_record = {
-      host = var.hostname
-      ip   = google_compute_global_address.external[0].address
+    for h in var.hostnames : h => {
+      dns_authorization = {
+        name = google_certificate_manager_dns_authorization.external[h].dns_resource_record[0].name
+        type = google_certificate_manager_dns_authorization.external[h].dns_resource_record[0].type
+        data = google_certificate_manager_dns_authorization.external[h].dns_resource_record[0].data
+      }
+      a_record = {
+        host = h
+        ip   = google_compute_global_address.external[0].address
+      }
     }
   } : null
 }

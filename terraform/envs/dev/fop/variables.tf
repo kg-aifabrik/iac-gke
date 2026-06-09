@@ -28,14 +28,14 @@ variable "automation_member" {
   type        = string
 }
 
-variable "external_hostname" {
-  description = "Public FQDN served by the external gateway (its managed cert is validated for this name)."
-  type        = string
-  default     = "app.dev.arthos.app"
+variable "external_hostnames" {
+  description = "Public FQDNs served by the external gateway (one managed cert + DNS-auth CNAME + A record each — SRE creates the records at the registrar). Two dev hosts exercise the multi-host path; dev stays on the registrar-controlled test domain because public DNS is manual (ADR-0006)."
+  type        = list(string)
+  default     = ["app.dev.arthos.app", "hello.dev.arthos.app"]
 }
 
-variable "internal_hostname" {
-  description = "Private FQDN served by the internal gateway (on the CAS-issued cert)."
-  type        = string
-  default     = "hello.internal.dev.arthos.app"
+variable "internal_hostnames" {
+  description = "Private FQDNs served by the internal gateway (SANs on the CAS cert + A records in the private zone). Private zones need no registrar control, so dev uses the work-domain convention (ADR-0006)."
+  type        = list(string)
+  default     = ["hello.dev.aifabrik.com", "tools.dev.aifabrik.com"]
 }

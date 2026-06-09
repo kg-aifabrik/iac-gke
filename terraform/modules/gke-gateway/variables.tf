@@ -39,9 +39,14 @@ variable "gateway_namespace" {
   default     = "gateway-system"
 }
 
-variable "hostname" {
-  description = "Primary hostname served by the gateway (external: the public FQDN validated for the managed cert; internal: the private FQDN on the CAS cert)."
-  type        = string
+variable "hostnames" {
+  description = "Hostnames served by the gateway (ADR-0005). External: each gets its own DNS authorization + managed certificate + certificate-map entry, served by SNI. Internal: all names are SANs on one CAS-issued certificate. Adding an app is adding a list entry."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.hostnames) > 0
+    error_message = "hostnames needs at least one entry."
+  }
 }
 
 variable "route_namespace_label" {

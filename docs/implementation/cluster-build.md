@@ -207,12 +207,18 @@ Every cluster gets **two gateways**, one module instance each (ADR-0001):
 
 - **External** (`gke-l7-global-external-managed`) — a global external Application Load Balancer
   for end-user traffic: a reserved global IP, a baseline Cloud Armor policy (WAF enforcement is
-  deferred — issue #26), and a **public** Certificate Manager managed certificate (DNS
-  authorization + certificate + map) attached by the `networking.gke.io/certmap` annotation. The
-  HTTPS listener carries no inline `tls` block — the certificate comes from the certmap.
+  deferred — issue #26), and **per-hostname** Certificate Manager managed certificates (a DNS
+  authorization + certificate + certificate-map *entry* per host; the map stays singular and is
+  attached by the `networking.gke.io/certmap` annotation, serving certs by SNI — ADR-0005). The
+  HTTPS listener carries no inline `tls` block — certificates come from the certmap.
 - **Internal** (`gke-l7-rilb`) — a regional internal Application Load Balancer for in-VPC
-  traffic: a reserved internal VIP on the proxy-only subnet, and a **private** CAS-issued
-  certificate that cert-manager writes into a Secret the listener terminates with.
+  traffic: a reserved internal VIP on the proxy-only subnet, and one **multi-SAN** CAS-issued
+  certificate (every internal hostname an explicit SAN, no wildcards) that cert-manager writes
+  into a Secret the listener terminates with; adding a hostname reissues it automatically.
+- **Hostnames are lists** (`external_hostnames` / `internal_hostnames`) — adding an app to a
+  gateway is one list entry; the `dns_records` output emits the registrar records per external
+  host. Listeners match all attached hostnames; HTTPRoutes declare the names they own, and
+  namespace labels still gate attachment.
 
 Both render the same in-cluster shape: a `Gateway`, an HTTP→HTTPS redirect `HTTPRoute`, and a
 `GCPGatewayPolicy` setting the SSL policy (minimum TLS 1.2, MODERN profile). Workload

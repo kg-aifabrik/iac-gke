@@ -1,8 +1,9 @@
 # gke-gateway — one gateway of a given exposure: the Google edge resources
 # (reserved IP, SSL policy, HTTP→HTTPS redirect, and — external only —
-# Certificate Manager managed cert + Cloud Armor) plus the rendered in-cluster
-# Gateway / redirect HTTPRoute / GCPGatewayPolicy (and, internal, the
-# cert-manager Certificate). See design §8 and ADR-0001/0002.
+# per-hostname Certificate Manager certs + Cloud Armor) plus the rendered
+# in-cluster Gateway / redirect HTTPRoute / GCPGatewayPolicy (and, internal,
+# the multi-SAN cert-manager Certificate). Hostnames are a list: adding an app
+# is adding an entry (ADR-0005). See design §8 and ADR-0001/0002.
 #
 # Confirm-at-build: regional internal SSL-policy support on gke-l7-rilb via
 # GCPGatewayPolicy; the external HTTPS listener picking up certs from the
@@ -14,6 +15,12 @@ locals {
 
   tls_secret  = coalesce(var.tls_secret_name, "${var.name}-gateway-tls")
   route_label = { (var.route_namespace_label.key) = coalesce(var.route_namespace_label.value, var.name) }
+
+  # Per-hostname slugs for Google resource names (which take [a-z0-9-] only).
+  host_slug = { for h in var.hostnames : h => replace(h, ".", "-") }
+
+  # External hostnames as a set for for_each (empty when internal).
+  external_hosts = local.is_external ? toset(var.hostnames) : toset([])
 
   address_name    = local.is_external ? google_compute_global_address.external[0].name : google_compute_address.internal[0].name
   ssl_policy_name = local.is_external ? google_compute_ssl_policy.external[0].name : google_compute_region_ssl_policy.internal[0].name
@@ -38,16 +45,19 @@ locals {
         },
         merge(
           {
+            # No listener hostname: the gateway serves every name on its
+            # certificates, and HTTPRoutes declare the hostnames they own.
+            # Attachment stays gated by the namespace label (ADR-0005;
+            # per-hostname ownership arrives with the namespace stamps).
             name          = "https"
             protocol      = "HTTPS"
             port          = 443
-            hostname      = var.hostname
             allowedRoutes = { namespaces = { from = "Selector", selector = { matchLabels = local.route_label } } }
           },
           # External: TLS is supplied by the certmap annotation, so the HTTPS
           # listener carries NO tls block (a tls block with mode Terminate would
           # require certificateRefs and be rejected). Internal: terminate with the
-          # CAS-issued Secret cert-manager populates.
+          # CAS-issued multi-SAN Secret cert-manager populates.
           local.is_external ? {} : { tls = { mode = "Terminate", certificateRefs = [{ kind = "Secret", name = local.tls_secret, group = "" }] } },
         ),
       ]
@@ -74,14 +84,16 @@ locals {
     }
   }
 
-  # Internal only: cert-manager requests a leaf from CAS into the Secret.
+  # Internal only: cert-manager requests one multi-SAN leaf from CAS into the
+  # Secret — every internal hostname is an explicit SAN (no wildcards,
+  # ADR-0005); adding a name reissues the certificate automatically.
   internal_certificate = local.is_external ? null : {
     apiVersion = "cert-manager.io/v1"
     kind       = "Certificate"
     metadata   = { name = "${var.name}-tls", namespace = var.gateway_namespace }
     spec = {
       secretName = local.tls_secret
-      dnsNames   = [var.hostname]
+      dnsNames   = var.hostnames
       issuerRef  = { name = var.cas_cluster_issuer, kind = "GoogleCASClusterIssuer", group = "cas-issuer.jetstack.io" }
       privateKey = { algorithm = "RSA", size = 2048 }
       usages     = ["server auth", "digital signature", "key encipherment"]
@@ -150,24 +162,27 @@ resource "google_compute_security_policy" "armor" {
   }
 }
 
-# --- Certificate Manager (external, public managed cert) -------------------
+# --- Certificate Manager (external, public managed certs) ------------------
+# One DNS authorization + managed certificate + map ENTRY per hostname; the
+# certificate MAP stays singular (the Gateway's certmap annotation points at
+# it) and serves the right certificate by SNI (ADR-0005).
 
 resource "google_certificate_manager_dns_authorization" "external" {
-  count   = local.is_external ? 1 : 0
-  project = var.project_id
-  name    = "${var.name}-dnsauth"
-  domain  = var.hostname
-  labels  = var.labels
+  for_each = local.external_hosts
+  project  = var.project_id
+  name     = "${var.name}-dnsauth-${local.host_slug[each.value]}"
+  domain   = each.value
+  labels   = var.labels
 }
 
 resource "google_certificate_manager_certificate" "external" {
-  count   = local.is_external ? 1 : 0
-  project = var.project_id
-  name    = "${var.name}-cert"
-  labels  = var.labels
+  for_each = local.external_hosts
+  project  = var.project_id
+  name     = "${var.name}-cert-${local.host_slug[each.value]}"
+  labels   = var.labels
   managed {
-    domains            = [var.hostname]
-    dns_authorizations = [google_certificate_manager_dns_authorization.external[0].id]
+    domains            = [each.value]
+    dns_authorizations = [google_certificate_manager_dns_authorization.external[each.value].id]
   }
 }
 
@@ -179,10 +194,10 @@ resource "google_certificate_manager_certificate_map" "external" {
 }
 
 resource "google_certificate_manager_certificate_map_entry" "external" {
-  count        = local.is_external ? 1 : 0
+  for_each     = local.external_hosts
   project      = var.project_id
-  name         = "${var.name}-certmap-entry"
+  name         = "${var.name}-certmap-${local.host_slug[each.value]}"
   map          = google_certificate_manager_certificate_map.external[0].name
-  certificates = [google_certificate_manager_certificate.external[0].id]
-  hostname     = var.hostname
+  certificates = [google_certificate_manager_certificate.external[each.value].id]
+  hostname     = each.value
 }

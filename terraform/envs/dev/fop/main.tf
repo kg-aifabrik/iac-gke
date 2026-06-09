@@ -49,9 +49,10 @@ module "stack" {
   operator_members  = var.operator_members
   automation_member = var.automation_member
 
-  # Ingress hostnames under the dev domain (public external + private internal).
-  external_hostname = var.external_hostname
-  internal_hostname = var.internal_hostname
+  # Ingress hostnames (public external + private internal), multi-app per
+  # gateway (ADR-0005); internal names resolve via the private zone (ADR-0006).
+  external_hostnames = var.external_hostnames
+  internal_hostnames = var.internal_hostnames
 
   # The platform TLS add-ons (cert-manager/trust-manager/google-cas-issuer) pull
   # images from quay.io, which private nodes can't reach over Private Google
