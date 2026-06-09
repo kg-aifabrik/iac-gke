@@ -182,11 +182,12 @@ module "access" {
 module "private_ca" {
   source = "../private-ca"
 
-  project_id    = var.project_id
-  region        = var.region
-  environment   = var.environment
-  workload_pool = module.cluster.workload_pool
-  labels        = local.labels
+  project_id          = var.project_id
+  region              = var.region
+  environment         = var.environment
+  workload_pool       = module.cluster.workload_pool
+  deletion_protection = var.deletion_protection
+  labels              = local.labels
 }
 
 # Two gateways per cluster (ADR-0001). External: internet-facing, public cert,

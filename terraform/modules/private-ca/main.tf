@@ -37,6 +37,11 @@ resource "google_privateca_certificate_authority" "root" {
   # Allow deletion in dev even after the subordinate has been signed.
   deletion_protection                    = var.deletion_protection
   ignore_active_certificates_on_deletion = true
+  # Purge immediately on delete (no 30-day recovery window) when the CA is
+  # unprotected, so its pool can be deleted in the same `terraform destroy` run
+  # instead of failing on "CAs must be past their recovery period" (#31). A
+  # protected (prod) CA keeps the recovery window.
+  skip_grace_period = !var.deletion_protection
 
   config {
     subject_config {
@@ -85,6 +90,9 @@ resource "google_privateca_certificate_authority" "subordinate" {
 
   deletion_protection                    = var.deletion_protection
   ignore_active_certificates_on_deletion = true
+  # See the root CA above: purge immediately when unprotected so the pool deletes
+  # cleanly in one destroy run (#31); keep the recovery window when protected.
+  skip_grace_period = !var.deletion_protection
 
   # Signed (and auto-activated) by the root above.
   subordinate_config {
