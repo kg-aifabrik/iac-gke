@@ -213,14 +213,20 @@ check_external_ingress() {
     return
   fi
   # --resolve hits the gateway IP directly; the public cert still validates by
-  # SNI/hostname, so DNS need not have propagated. No -k: the cert must be valid.
-  local code
-  code="$(curl -sS --max-time 30 --resolve "${EXTERNAL_HOSTNAME}:443:${EXTERNAL_IP}" \
-    -o /tmp/ext_body -w '%{http_code}' "https://${EXTERNAL_HOSTNAME}/" 2>/tmp/ext_err || true)"
+  # SNI/hostname (no -k). The global load balancer takes minutes to program its
+  # HTTPS frontend after the cert goes ACTIVE, so retry until it serves.
+  log "  waiting for the external load balancer to program (up to ~6 min)..."
+  local code="" attempt
+  for attempt in $(seq 1 18); do
+    code="$(curl -sS --max-time 15 --resolve "${EXTERNAL_HOSTNAME}:443:${EXTERNAL_IP}" \
+      -o /tmp/ext_body -w '%{http_code}' "https://${EXTERNAL_HOSTNAME}/" 2>/tmp/ext_err || true)"
+    [[ "${code}" == "200" ]] && break
+    sleep 20
+  done
   if [[ "${code}" == "200" ]] && grep -q "Hello World" /tmp/ext_body 2>/dev/null; then
     record PASS external-ingress "HTTPS 200 + 'Hello World' with a publicly-trusted cert at ${EXTERNAL_HOSTNAME}"
   else
-    record FAIL external-ingress "HTTP '${code}' ($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 100)); is the managed cert ACTIVE?"
+    record FAIL external-ingress "HTTP '${code}' ($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 100)); LB programmed? cert ACTIVE?"
   fi
 }
 
@@ -236,9 +242,14 @@ check_internal_ingress() {
     return
   fi
   # The internal VIP is private, so curl from an in-cluster pod, trusting the CAS
-  # root that trust-manager distributed (the cas-root ConfigMap).
-  kubectl -n internal-tools delete pod ingress-test --ignore-not-found >/dev/null 2>&1 || true
-  cat <<EOF | kubectl apply -f - >/dev/null
+  # root that trust-manager distributed (the cas-root ConfigMap). The internal
+  # ALB also takes a few minutes to program its route/backend, so re-run the
+  # probe pod until it answers 200.
+  log "  waiting for the internal load balancer to program (up to ~7 min)..."
+  local logs="" attempt phase
+  for attempt in $(seq 1 10); do
+    kubectl -n internal-tools delete pod ingress-test --ignore-not-found >/dev/null 2>&1 || true
+    cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: v1
 kind: Pod
 metadata: { name: ingress-test, namespace: internal-tools }
@@ -248,7 +259,7 @@ spec:
   containers:
     - name: curl
       image: ${REGISTRY_PROXY}/curlimages/curl:8.10.1
-      command: ["sh", "-c", "curl -sS --max-time 30 --cacert /trust/ca.crt --resolve ${INTERNAL_HOSTNAME}:443:${INTERNAL_IP} -o /tmp/b -w 'HTTP:%{http_code}\\n' https://${INTERNAL_HOSTNAME}/; cat /tmp/b"]
+      command: ["sh", "-c", "curl -sS --max-time 15 --cacert /trust/ca.crt --resolve ${INTERNAL_HOSTNAME}:443:${INTERNAL_IP} -o /tmp/b -w 'HTTP:%{http_code}\\n' https://${INTERNAL_HOSTNAME}/; cat /tmp/b"]
       securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
       volumeMounts:
         - { name: trust, mountPath: /trust, readOnly: true }
@@ -259,14 +270,16 @@ spec:
     - name: tmp
       emptyDir: {}
 EOF
-  local phase=""
-  for _ in 1 2 3 4 5 6 7 8; do
-    phase="$(kubectl -n internal-tools get pod ingress-test -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-    [[ "${phase}" == "Succeeded" || "${phase}" == "Failed" ]] && break
-    sleep 5
+    phase=""
+    for _ in 1 2 3 4 5 6; do
+      phase="$(kubectl -n internal-tools get pod ingress-test -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+      [[ "${phase}" == "Succeeded" || "${phase}" == "Failed" ]] && break
+      sleep 5
+    done
+    logs="$(kubectl -n internal-tools logs ingress-test 2>/dev/null || true)"
+    grep -q "HTTP:200" <<<"${logs}" && break
+    sleep 15
   done
-  local logs
-  logs="$(kubectl -n internal-tools logs ingress-test 2>/dev/null || true)"
   if grep -q "HTTP:200" <<<"${logs}" && grep -q "Hello World" <<<"${logs}"; then
     record PASS internal-ingress "HTTPS 200 + 'Hello World' with the CAS cert (verified against the CAS root)"
   else
