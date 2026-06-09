@@ -47,4 +47,10 @@ module "stack" {
   # Ingress hostnames under the dev domain (public external + private internal).
   external_hostname = var.external_hostname
   internal_hostname = var.internal_hostname
+
+  # The platform TLS add-ons (cert-manager/trust-manager/google-cas-issuer) pull
+  # images from quay.io, which private nodes can't reach over Private Google
+  # Access. Enable Cloud NAT so they can. Mirroring these through Artifact
+  # Registry to restore no-public-egress is tracked separately.
+  enable_cloud_nat = true
 }

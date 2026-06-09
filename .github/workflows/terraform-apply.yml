@@ -124,12 +124,12 @@ jobs:
           helm repo add jetstack https://charts.jetstack.io --force-update
           helm repo update
           helm upgrade --install cert-manager jetstack/cert-manager \
-            -n cert-manager --create-namespace --version v1.16.2 --set crds.enabled=true --wait
+            -n cert-manager --create-namespace --version v1.16.2 --set crds.enabled=true --wait --timeout 600s
           helm upgrade --install trust-manager jetstack/trust-manager \
-            -n cert-manager --version v0.13.0 --wait
+            -n cert-manager --version v0.13.0 --wait --timeout 600s
           helm upgrade --install google-cas-issuer jetstack/cert-manager-google-cas-issuer \
             -n cert-manager --version v0.9.1 \
-            --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=${gsa}" --wait
+            --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=${gsa}" --wait --timeout 600s
 
           # Apply the platform manifests. Gateway IAM granted in this same apply
           # may need a moment to propagate.
