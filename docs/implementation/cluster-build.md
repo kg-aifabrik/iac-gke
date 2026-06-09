@@ -3,7 +3,7 @@
 An operator-facing record of how a cluster is assembled, and why — read this instead
 of reverse-engineering the Terraform. It grows one section per layer as each is built.
 
-*Design (the why): [cluster-ctrl `docs/designs/google-cloud-design.md`](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md). Plan: [`docs/plans/milestone-1-cluster-factory.md`](../plans/milestone-1-cluster-factory.md).*
+*Design (the why): [cluster-ctrl `docs/designs/google-cloud-design.md`](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md). Plans: [`milestone-1-cluster-factory.md`](../plans/milestone-1-cluster-factory.md) (cluster), [`milestone-2-ingress.md`](../plans/milestone-2-ingress.md) (ingress & TLS).*
 
 ---
 
@@ -49,8 +49,11 @@ them to itself). Idempotent.
   `dns.admin` (network, firewall, DNS); `container.admin` (clusters); `cloudkms.admin` (key +
   key IAM); `iam.serviceAccountAdmin` + `iam.serviceAccountUser` (node identity);
   `resourcemanager.projectIamAdmin` (grant node/Gateway roles); `artifactregistry.admin`;
-  `binaryauthorization.policyEditor`; `gkehub.admin` (fleet). The superseded read-only role
-  is removed so the set stays exact.
+  `binaryauthorization.policyEditor`; `gkehub.admin` (fleet); `privateca.admin` (CAS pools and
+  CAs for internal TLS); and `certificatemanager.owner` (public managed certs / maps / DNS
+  authorizations — `owner`, not `editor`, because `editor` lacks the `*.delete` permissions a
+  clean teardown needs). Superseded roles — the Milestone 0 read-only viewer, and
+  `certificatemanager.editor` once replaced by `.owner` — are removed so the set stays exact.
 
 Elevating the identity changes its role set, so the `verify-access` workflow's expected-roles
 value is re-synced to this build set when the bootstrap is run — kept out of that commit so
@@ -66,7 +69,12 @@ the Milestone 0 check isn't tripped before the roles actually change.
 - **Private Google Access** — on the subnet, so private nodes (no external IP) reach Google
   APIs and Artifact Registry over Google's internal path — no NAT needed for Google services.
 - **Cloud NAT** — optional (`enable_cloud_nat`, default off); only for workloads needing the
-  public internet. Egress is also gated by the namespace default-deny network policy.
+  public internet. Egress is also gated by the namespace default-deny network policy. (Dev
+  currently turns it on so the in-cluster TLS controllers can pull their images from quay.io
+  until those are mirrored through Artifact Registry — issue #27.)
+- **Proxy-only subnet** — a regional `REGIONAL_MANAGED_PROXY` subnet (`enable_proxy_only_subnet`),
+  required by the internal regional Application Load Balancer (the internal gateway) for its
+  managed Envoy proxies. Created only when a cluster fronts an internal gateway.
 
 Outputs the network/subnet and the `pods`/`services` range names the cluster's IP
 allocation policy references. (Restricted-VIP private DNS for VPC Service Controls is a
@@ -165,13 +173,49 @@ kubectl get nodes
 The automation does the same with the impersonated service account to apply in-cluster
 resources during a build.
 
+## Private CA — `terraform/modules/private-ca`
+
+Internal endpoints get TLS from a private certificate authority, so their hostnames never
+appear in public Certificate Transparency logs (ADR-0002). Certificate Authority Service (CAS)
+holds the hierarchy:
+
+- **Root + subordinate** — a self-signed root (10-year, kept cold) signs a per-environment
+  subordinate (5-year) that issues the leaf certificates; both `ENTERPRISE` tier, RSA-4096.
+  Unprotected (dev) CAs purge immediately on destroy so their pools delete cleanly in one run;
+  protected (prod) CAs keep the 30-day recovery window (see the lock/teardown notes and #31).
+- **cert-manager identity** — a Google service account that google-cas-issuer impersonates via
+  Workload Identity, holding `roles/privateca.certificateRequester` on the **subordinate pool
+  only** (least privilege — it may request leaves, not manage the CAs and not touch the root).
+
+Terraform owns the CAS Google resources; the in-cluster `GoogleCASClusterIssuer`, the root
+trust bundle, and the leaf `Certificate`s are rendered manifests (see the in-cluster section).
+
+## Ingress & TLS — `terraform/modules/gke-gateway`
+
+Every cluster gets **two gateways**, one module instance each (ADR-0001):
+
+- **External** (`gke-l7-global-external-managed`) — a global external Application Load Balancer
+  for end-user traffic: a reserved global IP, a baseline Cloud Armor policy (WAF enforcement is
+  deferred — issue #26), and a **public** Certificate Manager managed certificate (DNS
+  authorization + certificate + map) attached by the `networking.gke.io/certmap` annotation. The
+  HTTPS listener carries no inline `tls` block — the certificate comes from the certmap.
+- **Internal** (`gke-l7-rilb`) — a regional internal Application Load Balancer for in-VPC
+  traffic: a reserved internal VIP on the proxy-only subnet, and a **private** CAS-issued
+  certificate that cert-manager writes into a Secret the listener terminates with.
+
+Both render the same in-cluster shape: a `Gateway`, an HTTP→HTTPS redirect `HTTPRoute`, and a
+`GCPGatewayPolicy` setting the SSL policy (minimum TLS 1.2, MODERN profile). Workload
+`HTTPRoute`s attach across namespaces by a selector label (`ingress=external|internal`), so a
+namespace opts into a gateway by labelling itself — consistent WAF/TLS configuration stays in
+the platform, not in each application.
+
 ## The factory — `modules/cluster-stack` + `envs/`
 
 Building a cluster is **choosing coordinates, not writing code**. The three dimensions —
 **account** (the project), **environment**, **purpose** — map onto the layout:
 
 ```
-modules/cluster-stack/    composes network + supply-chain + gke-cluster + access (one purpose)
+modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways
 envs/dev/foundation/      the per-project foundation (services, KMS, node SA) — applied once
 envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls the stack
 ```
@@ -184,7 +228,7 @@ envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls th
 - **`cluster-stack` is the composition** — it takes the coordinates (environment, purpose,
   sizing) and the foundation's outputs, derives names (`gke-dev-fop`, …) and the **three
   zones** (the region's first three, unless overridden), stamps consistent
-  `environment/purpose/cluster` labels, and wires the four per-purpose modules. The hardening
+  `environment/purpose/cluster` labels, and wires the six per-purpose modules. The hardening
   inside those modules is identical for every cluster; only the inputs differ.
 - **`envs/dev/fop` is thin** — it pins dev-FOP's shape (smallest sizing: one `e2-medium` per
   zone × 3 zones, general pool only; `REGULAR` channel + a weekend maintenance window; not
@@ -265,11 +309,18 @@ multi-doc YAML (`incluster_manifests`):
   rendered from the cluster key (the Compute service agent already holds the key grant). It
   is *not* marked the cluster default (to avoid duelling with GKE's `standard-rwo`);
   workloads request it by name.
+- **Platform namespaces** — `gateway-system` plus the workload namespaces, each labelled so its
+  HTTPRoutes may attach to the matching gateway (`ingress=external|internal`).
+- **Gateways + TLS wiring** — the `fop` apply first Helm-installs the pinned TLS controllers
+  (cert-manager, trust-manager, google-cas-issuer) so their custom resource definitions exist,
+  then applies the two `Gateway`s with their redirect routes and SSL policies, the
+  `GoogleCASClusterIssuer`, and the CAS root **trust bundle** that trust-manager fans out to
+  every namespace.
 
 **Validation (`examples/validate.sh`)** proves the cluster is genuinely ready for workloads
 from an end user's point of view (WLD-2), and the examples double as **compliant reference
 deployments** (non-root, read-only root filesystem, dropped capabilities, seccomp
-`RuntimeDefault`, resource limits). It deploys four cases over the gateway and asserts the
+`RuntimeDefault`, resource limits). It deploys six cases and asserts the
 end-to-end outcome, not just that pods start:
 
 | Example | End-to-end assertion |
@@ -278,7 +329,10 @@ end-to-end outcome, not just that pods start:
 | `encrypted-pvc` | data **persists** on the encrypted volume across pod recreation |
 | `artifact-registry` | a pull through the proxy is **admitted** (Binary Authorization audit) and runs |
 | `workload-identity` | a pod **reads a Secret Manager secret** via its own Google identity |
+| `external-ingress` | an HTTPS call to the public host returns **200** with a **publicly-trusted** certificate |
+| `internal-ingress` | an in-cluster HTTPS call returns **200** with the **CAS-issued** cert, verified to the CAS root |
 
 Run at bring-up by an operator (it needs operator-level permissions to create the throwaway
-Workload-Identity scaffolding); the summary is pasted into issue #11 as evidence, and the
-runtime acceptance criteria are checked off only once it passes against the real cluster.
+Workload-Identity scaffolding); the summary is pasted into the milestone's verification issue
+as evidence, and the runtime acceptance criteria are checked off only once it passes against
+the real cluster.
