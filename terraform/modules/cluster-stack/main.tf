@@ -24,27 +24,34 @@ locals {
     managed-by  = "cluster-ctrl"
   }, var.extra_labels)
 
-  # A CMEK-encrypted persistent-disk StorageClass — the platform default for
-  # encrypted volumes (the Compute service agent already holds the key grant).
-  # Not marked the cluster default to avoid duelling with GKE's standard-rwo;
-  # workloads request it by name. Rendered (not a kubernetes_* resource) and
-  # applied by the pipeline with kubectl, like the access RBAC.
-  storageclass_manifest = yamlencode({
-    apiVersion = "storage.k8s.io/v1"
-    kind       = "StorageClass"
-    metadata = {
-      name   = "encrypted-rwo"
-      labels = { "app.kubernetes.io/managed-by" = "cluster-ctrl" }
-    }
-    provisioner = "pd.csi.storage.gke.io"
-    parameters = {
-      type                      = "pd-balanced"
-      "disk-encryption-kms-key" = var.kms_key_id
-    }
-    volumeBindingMode    = "WaitForFirstConsumer"
-    allowVolumeExpansion = true
-    reclaimPolicy        = "Delete"
-  })
+  # The platform's CMEK-encrypted persistent-disk StorageClasses (the Compute
+  # service agent already holds the key grant). Neither is marked the cluster
+  # default (avoids duelling with GKE's standard-rwo); workloads opt in by
+  # name. `encrypted-regional-rwo` replicates synchronously across two zones so
+  # the volume survives a zone failure — ~2x the disk cost, which is why it is
+  # a second named class and not the default (ADR-0008). Rendered (not
+  # kubernetes_* resources) and applied by the pipeline with kubectl.
+  storageclass_manifests = [
+    for sc in [
+      { name = "encrypted-rwo", params = {} },
+      { name = "encrypted-regional-rwo", params = { "replication-type" = "regional-pd" } },
+      ] : yamlencode({
+        apiVersion = "storage.k8s.io/v1"
+        kind       = "StorageClass"
+        metadata = {
+          name   = sc.name
+          labels = { "app.kubernetes.io/managed-by" = "cluster-ctrl" }
+        }
+        provisioner = "pd.csi.storage.gke.io"
+        parameters = merge({
+          type                      = "pd-balanced"
+          "disk-encryption-kms-key" = var.kms_key_id
+        }, sc.params)
+        volumeBindingMode    = "WaitForFirstConsumer"
+        allowVolumeExpansion = true
+        reclaimPolicy        = "Delete"
+    })
+  ]
 
   # Platform namespaces: the gateway namespace and the two workload namespaces,
   # labelled so their HTTPRoutes may attach to the matching gateway. Full
@@ -89,13 +96,13 @@ locals {
   })
 
   # Everything the pipeline applies in-cluster after a build (after the Helm
-  # add-ons): namespaces, operator RBAC, the encrypted StorageClass, the CAS
+  # add-ons): namespaces, operator RBAC, the encrypted StorageClasses, the CAS
   # trust root + issuer + bundle, and the two gateways.
   incluster_manifests = join("\n---\n", concat(
     local.namespace_manifests,
+    [module.access.rbac_manifest],
+    local.storageclass_manifests,
     [
-      module.access.rbac_manifest,
-      local.storageclass_manifest,
       local.cas_root_configmap,
       local.cas_cluster_issuer,
       local.trust_bundle,

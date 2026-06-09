@@ -336,10 +336,12 @@ the stack *renders* them and the apply pipeline applies them over Connect Gatewa
 multi-doc YAML (`incluster_manifests`):
 
 - **Operator RBAC** — the `ClusterRoleBinding` from the access module.
-- **Encrypted StorageClass (`encrypted-rwo`)** — a CMEK-encrypted persistent-disk class,
-  rendered from the cluster key (the Compute service agent already holds the key grant). It
-  is *not* marked the cluster default (to avoid duelling with GKE's `standard-rwo`);
-  workloads request it by name.
+- **Encrypted StorageClasses** — two CMEK-encrypted persistent-disk classes rendered from the
+  cluster key (the Compute service agent already holds the key grant): **`encrypted-rwo`**
+  (zonal, the usual choice) and **`encrypted-regional-rwo`** (regional `pd-balanced`,
+  synchronously replicated across two zones — survives a zone failure at ~2× disk cost,
+  ADR-0008). Neither is marked the cluster default (to avoid duelling with GKE's
+  `standard-rwo`); workloads opt in by name.
 - **Platform namespaces** — `gateway-system` plus the workload namespaces, each labelled so its
   HTTPRoutes may attach to the matching gateway (`ingress=external|internal`).
 - **Gateways + TLS wiring** — the `fop` apply first Helm-installs the pinned TLS controllers
