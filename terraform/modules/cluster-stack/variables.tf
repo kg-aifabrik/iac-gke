@@ -157,6 +157,24 @@ variable "enable_confidential_pool" {
   default     = false
 }
 
+variable "enable_backup" {
+  description = "Create the Backup for GKE backup + restore plans for this cluster (ADR-0004)."
+  type        = bool
+  default     = true
+}
+
+variable "backup_schedule" {
+  description = "Cron schedule for automatic backups."
+  type        = string
+  default     = "0 3 * * *"
+}
+
+variable "backup_retain_days" {
+  description = "Days a backup is kept (short in dev so teardown never strands storage)."
+  type        = number
+  default     = 3
+}
+
 variable "confidential_machine_type" {
   description = "Machine type for the Confidential pool."
   type        = string

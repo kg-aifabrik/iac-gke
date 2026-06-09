@@ -30,6 +30,7 @@ locals {
     "dns.googleapis.com",
     "certificatemanager.googleapis.com", # public gateway certs (TC-7)
     "privateca.googleapis.com",          # CAS private CA for internal TLS (TC-7)
+    "gkebackup.googleapis.com",          # Backup for GKE (ADR-0004)
   ])
 
   # The Compute service agent encrypts node boot/attached disks with our key.
@@ -91,6 +92,24 @@ resource "google_kms_crypto_key_iam_member" "compute_disks" {
   member        = "serviceAccount:${local.compute_agent_email}"
 
   depends_on = [google_project_service.this]
+}
+
+# Force the Backup for GKE service agent into existence (same race as the GKE
+# agent above: the key grant must not depend on lazy agent creation).
+resource "google_project_service_identity" "gkebackup" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "gkebackup.googleapis.com"
+
+  depends_on = [google_project_service.this]
+}
+
+# Grant (c): the Backup for GKE service agent encrypts backups with the same
+# cluster key — wired on the backup plan's encryption_key (ADR-0004).
+resource "google_kms_crypto_key_iam_member" "gkebackup_backups" {
+  crypto_key_id = google_kms_crypto_key.cluster.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${google_project_service_identity.gkebackup.email}"
 }
 
 # --- Least-privilege node identity -----------------------------------------

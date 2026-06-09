@@ -20,9 +20,10 @@ What it creates in each environment's project:
 - **Cluster encryption key** — a Cloud KMS key ring + key in the cluster's region (KMS has
   no global option for this), rotating every 90 days. Created once and kept: key rings and
   keys can't be deleted, so teardown leaves them and re-runs reuse them.
-- **Two key grants** — the **GKE** service agent gets key use for **secret (etcd)**
-  encryption; the **Compute** service agent gets key use for **node/disk** encryption. Both
-  are required — missing either breaks the cluster.
+- **Three key grants** — the **GKE** service agent gets key use for **secret (etcd)**
+  encryption; the **Compute** service agent for **node/disk** encryption; the **Backup for
+  GKE** service agent for **backup** encryption (ADR-0004). The first two are required —
+  missing either breaks the cluster; the third is required for CMEK-encrypted backups.
 - **Node identity** — a least-privilege node service account holding only
   `roles/container.defaultNodeServiceAccount` (logging, metrics, inventory). Image pull
   (`roles/artifactregistry.reader`) is granted repository-scoped by the supply-chain module.
@@ -52,7 +53,8 @@ them to itself). Idempotent.
   `binaryauthorization.policyEditor`; `gkehub.admin` (fleet); `privateca.admin` (CAS pools and
   CAs for internal TLS); and `certificatemanager.owner` (public managed certs / maps / DNS
   authorizations — `owner`, not `editor`, because `editor` lacks the `*.delete` permissions a
-  clean teardown needs). Superseded roles — the Milestone 0 read-only viewer, and
+  clean teardown needs); and `gkebackup.admin` (backup/restore plans + on-demand backups,
+  ADR-0004). Superseded roles — the Milestone 0 read-only viewer, and
   `certificatemanager.editor` once replaced by `.owner` — are removed so the set stays exact.
 
 Elevating the identity changes its role set, so the `verify-access` workflow's expected-roles
@@ -218,13 +220,33 @@ Both render the same in-cluster shape: a `Gateway`, an HTTP→HTTPS redirect `HT
 namespace opts into a gateway by labelling itself — consistent WAF/TLS configuration stays in
 the platform, not in each application.
 
+## Backup and restore — `terraform/modules/gke-backup`
+
+Stateful workloads are recoverable from deletion, corruption, and operator error
+(ADR-0004, design §9). Backup for GKE captures Kubernetes objects, Secrets, and volume data
+**together**, so a restore is a working workload, not a loose disk image.
+
+- **Agent** — enabled on the cluster (`gke_backup_agent_config`); free until a plan exists.
+- **Backup plan** (`<cluster>-daily`) — cron schedule + retention as runtime inputs, all
+  namespaces, volume data + Secrets included, **CMEK-encrypted** with the cluster key (the
+  third service-agent grant in the foundation). Dev keeps retention short (3 days) and no
+  delete lock, so teardown never strands storage; production sets real retention (and a
+  delete lock as a later hardening).
+- **Restore plan** (`<cluster>-restore`) — the pinned restore policy: namespaced resources
+  delete-and-restore, volumes from backup data, cluster-scoped resources untouched (they
+  belong to the platform). An on-demand restore is an operator/automation action against it
+  (`gcloud backup-restore restores create`).
+- **Teardown discipline (#31)** — backups can outlive the cluster by design, so the
+  validation deletes the backups it creates and the destroy path purges any remaining before
+  the plan. The automation holds `roles/gkebackup.admin` (15th build role).
+
 ## The factory — `modules/cluster-stack` + `envs/`
 
 Building a cluster is **choosing coordinates, not writing code**. The three dimensions —
 **account** (the project), **environment**, **purpose** — map onto the layout:
 
 ```
-modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways
+modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways + gke-backup
 envs/dev/foundation/      the per-project foundation (services, KMS, node SA) — applied once
 envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls the stack
 ```
@@ -237,7 +259,7 @@ envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls th
 - **`cluster-stack` is the composition** — it takes the coordinates (environment, purpose,
   sizing) and the foundation's outputs, derives names (`gke-dev-fop`, …) and the **three
   zones** (the region's first three, unless overridden), stamps consistent
-  `environment/purpose/cluster` labels, and wires the six per-purpose modules. The hardening
+  `environment/purpose/cluster` labels, and wires the seven per-purpose modules. The hardening
   inside those modules is identical for every cluster; only the inputs differ.
 - **`envs/dev/fop` is thin** — it pins dev-FOP's shape (`e2-medium`, general pool only,
   autoscaling 1–2 nodes per zone × 3 zones; `REGULAR` channel + a weekend maintenance window;

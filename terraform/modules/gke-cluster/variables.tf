@@ -129,6 +129,12 @@ variable "general_autoscaling" {
   }
 }
 
+variable "enable_backup_agent" {
+  description = "Enable the Backup for GKE agent add-on (ADR-0004). The agent is free; backup plans are created by the gke-backup module."
+  type        = bool
+  default     = true
+}
+
 variable "autoscaling_profile" {
   description = "Cluster-autoscaler profile: BALANCED (default) or OPTIMIZE_UTILIZATION (denser bin-packing, opt-in). Applies to the per-pool autoscaler; node auto-provisioning stays off (ADR-0007)."
   type        = string

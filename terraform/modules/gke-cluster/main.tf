@@ -100,6 +100,14 @@ resource "google_container_cluster" "this" {
     channel = "CHANNEL_STANDARD"
   }
 
+  # Backup for GKE agent (ADR-0004). The agent alone costs nothing; the
+  # backup/restore plans live in the gke-backup module.
+  addons_config {
+    gke_backup_agent_config {
+      enabled = var.enable_backup_agent
+    }
+  }
+
   # Join the fleet — the prerequisite for Connect Gateway.
   fleet {
     project = var.project_id

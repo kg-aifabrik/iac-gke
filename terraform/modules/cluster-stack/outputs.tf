@@ -60,3 +60,13 @@ output "cas_subordinate_pool" {
   description = "CAS subordinate pool the GoogleCASClusterIssuer issues from."
   value       = module.private_ca.subordinate_ca_pool_name
 }
+
+output "backup_plan_name" {
+  description = "Backup for GKE plan name (null when backup is disabled) — used by the validation suite for on-demand backups."
+  value       = var.enable_backup ? module.backup[0].backup_plan_name : null
+}
+
+output "restore_plan_name" {
+  description = "Backup for GKE restore-plan name (null when backup is disabled)."
+  value       = var.enable_backup ? module.backup[0].restore_plan_name : null
+}

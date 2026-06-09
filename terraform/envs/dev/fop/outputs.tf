@@ -53,3 +53,14 @@ output "internal_gateway_ip" {
   description = "Private VIP of the internal gateway."
   value       = module.stack.internal_gateway_ip
 }
+
+# Used by the validation suite to trigger an on-demand backup and restore.
+output "backup_plan_name" {
+  description = "Backup for GKE plan name."
+  value       = module.stack.backup_plan_name
+}
+
+output "restore_plan_name" {
+  description = "Backup for GKE restore-plan name."
+  value       = module.stack.restore_plan_name
+}

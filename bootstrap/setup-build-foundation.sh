@@ -37,6 +37,7 @@ BUILD_ROLES=(
   roles/gkehub.admin
   roles/privateca.admin           # create CAS pools/CAs + set pool IAM (M2 ingress)
   roles/certificatemanager.owner  # create AND delete managed certs/maps/DNS auth — editor has no *.delete, blocking clean teardown (#31)
+  roles/gkebackup.admin           # Backup for GKE plans + on-demand backups/restores (M3 HA, ADR-0004)
 )
 # Roles to remove if present, so a re-run leaves the identity's role set exact.
 SUPERSEDED_ROLES=(

@@ -180,6 +180,22 @@ module "access" {
   cluster_role      = var.cluster_role
 }
 
+# Backup for GKE (ADR-0004): scheduled CMEK-encrypted backups + the pinned
+# restore path. Off only where a cluster genuinely holds nothing worth keeping.
+module "backup" {
+  source = "../gke-backup"
+  count  = var.enable_backup ? 1 : 0
+
+  project_id  = var.project_id
+  region      = var.region
+  cluster_id  = module.cluster.cluster_id
+  name        = local.cluster_name
+  schedule    = var.backup_schedule
+  retain_days = var.backup_retain_days
+  kms_key_id  = var.kms_key_id
+  labels      = local.labels
+}
+
 # Private CA (CAS) for internal-endpoint TLS, plus the cert-manager identity.
 module "private_ca" {
   source = "../private-ca"

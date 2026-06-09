@@ -66,12 +66,13 @@ jobs:
           SETUP_DOCTOR_REPOSITORY_ID: "1260827836" # kg-aifabrik/iac-gke (immutable)
           SETUP_DOCTOR_REF: refs/heads/main
           # The build-role set granted by bootstrap/setup-build-foundation.sh
-          # (14 project roles, now incl. privateca.admin + certificatemanager.owner
-          # for M2 — owner, not editor, because *.delete is needed for a clean
-          # teardown, #31). The two Connect Gateway roles the access module grants
-          # are added back here once the fop build re-applies (dev was torn down
-          # after M1, so they are not present yet). storage.objectAdmin is bucket-scoped.
-          SETUP_DOCTOR_EXPECTED_ROLES: roles/serviceusage.serviceUsageAdmin,roles/compute.networkAdmin,roles/compute.securityAdmin,roles/dns.admin,roles/container.admin,roles/cloudkms.admin,roles/iam.serviceAccountAdmin,roles/iam.serviceAccountUser,roles/resourcemanager.projectIamAdmin,roles/artifactregistry.admin,roles/binaryauthorization.policyEditor,roles/gkehub.admin,roles/privateca.admin,roles/certificatemanager.owner
+          # (15 project roles: privateca.admin + certificatemanager.owner for M2
+          # — owner, not editor, because *.delete is needed for a clean teardown,
+          # #31 — and gkebackup.admin for M3 backup plans, ADR-0004). The two
+          # Connect Gateway roles the access module grants are added back here
+          # once the fop build re-applies (dev was torn down after M2, so they
+          # are not present yet). storage.objectAdmin is bucket-scoped.
+          SETUP_DOCTOR_EXPECTED_ROLES: roles/serviceusage.serviceUsageAdmin,roles/compute.networkAdmin,roles/compute.securityAdmin,roles/dns.admin,roles/container.admin,roles/cloudkms.admin,roles/iam.serviceAccountAdmin,roles/iam.serviceAccountUser,roles/resourcemanager.projectIamAdmin,roles/artifactregistry.admin,roles/binaryauthorization.policyEditor,roles/gkehub.admin,roles/privateca.admin,roles/certificatemanager.owner,roles/gkebackup.admin
         # In CI the automation SA is least-privilege, so the operator-only
         # structural checks (WIF provider, SA roles) report SKIP; the identity
         # and live-API checks must PASS. Exit is non-zero only on a real FAIL.
