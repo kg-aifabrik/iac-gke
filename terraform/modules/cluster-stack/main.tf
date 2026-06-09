@@ -187,6 +187,25 @@ module "access" {
   cluster_role      = var.cluster_role
 }
 
+# DNS (ADR-0006): the per-environment private zone resolving every internal
+# hostname to the internal VIP inside the VPC, plus the opt-in public zone.
+module "dns" {
+  source = "../dns-zones"
+
+  project_id           = var.project_id
+  internal_zone_domain = var.internal_zone_domain
+  internal_records     = { for h in var.internal_hostnames : h => module.gateway_internal.ip_address }
+  network_self_link    = module.network.network_self_link
+
+  manage_public_dns  = var.manage_public_dns
+  public_zone_domain = var.public_zone_domain
+  public_records     = var.manage_public_dns ? module.gateway_external.dns_records : {}
+
+  # Dev teardown hygiene (#31) follows the cluster's protection setting.
+  force_destroy = !var.deletion_protection
+  labels        = local.labels
+}
+
 # Backup for GKE (ADR-0004): scheduled CMEK-encrypted backups + the pinned
 # restore path. Off only where a cluster genuinely holds nothing worth keeping.
 module "backup" {

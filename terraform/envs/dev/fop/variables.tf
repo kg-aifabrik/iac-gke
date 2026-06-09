@@ -39,3 +39,21 @@ variable "internal_hostnames" {
   type        = list(string)
   default     = ["hello.dev.aifabrik.com", "tools.dev.aifabrik.com"]
 }
+
+variable "internal_zone_domain" {
+  description = "Domain of the dev private zone the internal hostnames live under."
+  type        = string
+  default     = "dev.aifabrik.com"
+}
+
+variable "manage_public_dns" {
+  description = "Opt-in public Cloud DNS zone for the external records (needs registrar delegation first; ADR-0006). Off: SRE creates the records manually from the dns_records output."
+  type        = bool
+  default     = false
+}
+
+variable "public_zone_domain" {
+  description = "Domain for the public zone if manage_public_dns is turned on."
+  type        = string
+  default     = "dev.arthos.app"
+}

@@ -226,6 +226,25 @@ Both render the same in-cluster shape: a `Gateway`, an HTTP→HTTPS redirect `HT
 namespace opts into a gateway by labelling itself — consistent WAF/TLS configuration stays in
 the platform, not in each application.
 
+## DNS — `terraform/modules/dns-zones`
+
+Internal hostnames resolve inside the VPC with zero client setup; public records stay
+SRE-manual with automation one flag away (ADR-0006, design §8).
+
+- **Private zone** — one per environment (dev: `dev.aifabrik.com`), bound to the cluster VPC,
+  with an A record per internal hostname → the internal gateway VIP. Pods resolve it through
+  the node resolver (kube-dns → metadata → Cloud DNS); split-horizon with the public domain,
+  the names never leave the VPC. Private zones need no registrar control, so every
+  environment uses the work-domain convention.
+- **Public zone (opt-in)** — `manage_public_dns` (default **off**). When the domain (or a
+  subdomain) is delegated to Cloud DNS at the registrar — one-time, manual — the per-host A
+  records *and* the Certificate Manager DNS-authorization CNAMEs (the record whose absence
+  stalled the M2 cert in `PROVISIONING`) become Terraform-managed. Until then SREs create
+  them from the `dns_records` output. The zone's `name_servers` output is the delegation
+  record set.
+- **Teardown hygiene (#31)** — `force_destroy` follows the cluster's deletion-protection
+  setting, so dev zones delete even with records present.
+
 ## Backup and restore — `terraform/modules/gke-backup`
 
 Stateful workloads are recoverable from deletion, corruption, and operator error
@@ -252,7 +271,7 @@ Building a cluster is **choosing coordinates, not writing code**. The three dime
 **account** (the project), **environment**, **purpose** — map onto the layout:
 
 ```
-modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways + gke-backup
+modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways + dns-zones + gke-backup
 envs/dev/foundation/      the per-project foundation (services, KMS, node SA) — applied once
 envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls the stack
 ```
@@ -265,7 +284,7 @@ envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls th
 - **`cluster-stack` is the composition** — it takes the coordinates (environment, purpose,
   sizing) and the foundation's outputs, derives names (`gke-dev-fop`, …) and the **three
   zones** (the region's first three, unless overridden), stamps consistent
-  `environment/purpose/cluster` labels, and wires the seven per-purpose modules. The hardening
+  `environment/purpose/cluster` labels, and wires the eight per-purpose modules. The hardening
   inside those modules is identical for every cluster; only the inputs differ.
 - **`envs/dev/fop` is thin** — it pins dev-FOP's shape (`e2-medium`, general pool only,
   autoscaling 1–2 nodes per zone × 3 zones; `REGULAR` channel + a weekend maintenance window;

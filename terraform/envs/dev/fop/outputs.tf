@@ -54,6 +54,11 @@ output "internal_gateway_ip" {
   value       = module.stack.internal_gateway_ip
 }
 
+output "private_zone_dns_name" {
+  description = "Private zone resolving the internal hostnames inside the VPC."
+  value       = module.stack.private_zone_dns_name
+}
+
 # Used by the validation suite to trigger an on-demand backup and restore.
 output "backup_plan_name" {
   description = "Backup for GKE plan name."

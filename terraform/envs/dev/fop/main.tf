@@ -51,8 +51,11 @@ module "stack" {
 
   # Ingress hostnames (public external + private internal), multi-app per
   # gateway (ADR-0005); internal names resolve via the private zone (ADR-0006).
-  external_hostnames = var.external_hostnames
-  internal_hostnames = var.internal_hostnames
+  external_hostnames   = var.external_hostnames
+  internal_hostnames   = var.internal_hostnames
+  internal_zone_domain = var.internal_zone_domain
+  manage_public_dns    = var.manage_public_dns
+  public_zone_domain   = var.public_zone_domain
 
   # The platform TLS add-ons (cert-manager/trust-manager/google-cas-issuer) pull
   # images from quay.io, which private nodes can't reach over Private Google

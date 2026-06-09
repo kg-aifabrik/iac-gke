@@ -61,6 +61,16 @@ output "cas_subordinate_pool" {
   value       = module.private_ca.subordinate_ca_pool_name
 }
 
+output "private_zone_dns_name" {
+  description = "DNS name of the private zone resolving the internal hostnames inside the VPC."
+  value       = module.dns.private_zone_dns_name
+}
+
+output "public_zone_name_servers" {
+  description = "NS records to set at the registrar when manage_public_dns is on (null otherwise)."
+  value       = module.dns.public_zone_name_servers
+}
+
 output "backup_plan_name" {
   description = "Backup for GKE plan name (null when backup is disabled) — used by the validation suite for on-demand backups."
   value       = var.enable_backup ? module.backup[0].backup_plan_name : null

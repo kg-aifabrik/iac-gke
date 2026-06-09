@@ -239,6 +239,23 @@ variable "internal_hostnames" {
   type        = list(string)
 }
 
+variable "internal_zone_domain" {
+  description = "Domain of the per-environment Cloud DNS private zone the internal hostnames live under (e.g. dev.aifabrik.com; ADR-0006)."
+  type        = string
+}
+
+variable "manage_public_dns" {
+  description = "Opt-in: create a public Cloud DNS zone and manage the external records (requires registrar delegation; off = SRE creates them manually; ADR-0006)."
+  type        = bool
+  default     = false
+}
+
+variable "public_zone_domain" {
+  description = "Domain of the public zone (only used when manage_public_dns is true)."
+  type        = string
+  default     = null
+}
+
 variable "proxy_only_cidr" {
   description = "CIDR for the regional proxy-only subnet the internal gateway needs."
   type        = string
