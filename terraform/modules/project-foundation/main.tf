@@ -28,6 +28,8 @@ locals {
     "monitoring.googleapis.com",
     "secretmanager.googleapis.com",
     "dns.googleapis.com",
+    "certificatemanager.googleapis.com", # public gateway certs (TC-7)
+    "privateca.googleapis.com",          # CAS private CA for internal TLS (TC-7)
   ])
 
   # The Compute service agent encrypts node boot/attached disks with our key.

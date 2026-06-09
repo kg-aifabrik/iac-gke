@@ -35,6 +35,8 @@ BUILD_ROLES=(
   roles/artifactregistry.admin
   roles/binaryauthorization.policyEditor
   roles/gkehub.admin
+  roles/privateca.admin           # create CAS pools/CAs + set pool IAM (M2 ingress)
+  roles/certificatemanager.editor # create managed certs / maps / DNS auth (M2 ingress)
 )
 # Superseded by serviceUsageAdmin; removed so the identity's role set stays exact.
 SUPERSEDED_ROLE="roles/serviceusage.serviceUsageViewer"
