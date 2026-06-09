@@ -63,6 +63,10 @@ def run_checks(clients: clients_mod.Clients, config: Config) -> list[CheckResult
         checks.check_cmek_grants(clients.cloudkms, config),
         checks.check_node_sa_roles(clients.resourcemanager, clients.iam, config),
         checks.check_connect_gateway_access(clients.resourcemanager, config),
+        # Ingress-setup checks — also SKIP unless a region is configured.
+        checks.check_cas_cas_enabled(clients.privateca, config),
+        checks.check_external_cert_active(clients.certificatemanager, config),
+        checks.check_gateway_ip_reserved(clients.compute, config),
     ]
 
 

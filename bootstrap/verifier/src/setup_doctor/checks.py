@@ -18,7 +18,7 @@ from typing import Any
 
 from googleapiclient.errors import HttpError
 
-from .config import CMEK_ROLE, CONNECT_GATEWAY_ROLES, Config
+from .config import CMEK_ROLE, CONNECT_GATEWAY_ROLES, EXTERNAL_GATEWAY_ADDRESS, Config
 from .models import CheckResult, Status
 
 logger = logging.getLogger(__name__)
@@ -471,3 +471,136 @@ def check_cluster_apis_enabled(serviceusage: Any, config: Config) -> CheckResult
     return CheckResult(
         name, Status.PASS, f"all {len(config.cluster_required_apis)} cluster APIs enabled"
     )
+
+
+# --- Ingress-setup checks (cluster mode) ------------------------------------
+
+
+def check_cas_cas_enabled(privateca: Any, config: Config) -> CheckResult:
+    """The CAS root and subordinate certificate authorities exist and are ENABLED.
+
+    Without an enabled subordinate CA, cert-manager cannot issue the internal
+    gateway's certificate. Reading CAS is operator-level, so HTTP 403 → SKIP.
+    """
+    name = "cas-cas-enabled"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.environment:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "environment not set (SETUP_DOCTOR_ENVIRONMENT)",
+            required=False,
+        )
+    cas_api = privateca.projects().locations().caPools().certificateAuthorities()
+    not_enabled: list[str] = []
+    try:
+        for tier in ("root", "subordinate"):
+            ca = cas_api.get(name=config.cas_ca_resource(tier)).execute(num_retries=3)
+            if ca.get("state") != "ENABLED":
+                not_enabled.append(f"{config.environment}-{tier}")
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read CAS; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                "CAS certificate authority not found",
+                remediation="apply the private-ca module (the fop root) to create the CAs",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading CAS (HTTP {status})")
+
+    if not_enabled:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "CAs not ENABLED: " + ", ".join(not_enabled),
+            remediation="enable the certificate authorities in CAS",
+        )
+    return CheckResult(name, Status.PASS, "root and subordinate CAs are ENABLED")
+
+
+def check_external_cert_active(certificatemanager: Any, config: Config) -> CheckResult:
+    """The external gateway's Certificate Manager managed certificate is ACTIVE.
+
+    A non-ACTIVE state almost always means the DNS-authorization record is not
+    yet in place or has not propagated. Operator-level read → HTTP 403 SKIP.
+    """
+    name = "external-cert-active"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    certs_api = certificatemanager.projects().locations().certificates()
+    try:
+        cert = certs_api.get(name=config.external_certificate_resource).execute(num_retries=3)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read Certificate Manager; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                "external managed certificate not found",
+                remediation="apply the fop root to create the certificate",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the certificate (HTTP {status})")
+
+    state = (cert.get("managed") or {}).get("state", "")
+    if state == "ACTIVE":
+        return CheckResult(name, Status.PASS, "external managed certificate is ACTIVE")
+    return CheckResult(
+        name,
+        Status.FAIL,
+        f"external managed certificate state is {state or 'unknown'!r} (not ACTIVE)",
+        remediation=(
+            "add the DNS-authorization CNAME + the hostname A record and allow time to validate"
+        ),
+    )
+
+
+def check_gateway_ip_reserved(compute: Any, config: Config) -> CheckResult:
+    """The external gateway's global static IP is reserved."""
+    name = "external-gateway-ip"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    project = config.project_id or config.project_number
+    try:
+        address = (
+            compute.globalAddresses()
+            .get(project=project, address=EXTERNAL_GATEWAY_ADDRESS)
+            .execute(num_retries=3)
+        )
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read Compute addresses; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                f"global address {EXTERNAL_GATEWAY_ADDRESS} not reserved",
+                remediation="apply the fop root to reserve the external gateway IP",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the address (HTTP {status})")
+
+    status = address.get("status", "")
+    if status in ("RESERVED", "IN_USE"):
+        return CheckResult(name, Status.PASS, f"external gateway IP reserved ({status})")
+    return CheckResult(name, Status.FAIL, f"external gateway IP status is {status or 'unknown'!r}")

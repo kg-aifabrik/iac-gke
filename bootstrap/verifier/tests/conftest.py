@@ -173,6 +173,71 @@ class FakeKms:
         return self._ck
 
 
+class FakePrivateCa:
+    """Fakes the CAS certificate-authority get. ``states`` maps a CA id to its state."""
+
+    def __init__(
+        self, states: dict[str, str] | None = None, error: HttpError | None = None
+    ) -> None:
+        self._states = states or {}
+        self._error = error
+
+    def projects(self) -> FakePrivateCa:
+        return self
+
+    def locations(self) -> FakePrivateCa:
+        return self
+
+    def caPools(self) -> FakePrivateCa:  # noqa: N802 - matches API method name
+        return self
+
+    def certificateAuthorities(self) -> FakePrivateCa:  # noqa: N802 - matches API method name
+        return self
+
+    def get(self, name: str) -> _Request:
+        ca = name.split("/certificateAuthorities/")[-1]
+        return _Request(result={"state": self._states.get(ca, "ENABLED")}, error=self._error)
+
+
+class _CertificatesNs:
+    def __init__(self, cert: object, error: HttpError | None) -> None:
+        self._cert = cert
+        self._error = error
+
+    def get(self, name: str) -> _Request:
+        return _Request(self._cert, self._error)
+
+
+class FakeCertificateManager:
+    """Fakes ``certificatemanager.projects().locations().certificates().get().execute()``."""
+
+    def __init__(self, state: str = "ACTIVE", error: HttpError | None = None) -> None:
+        self._certs = _CertificatesNs({"managed": {"state": state}}, error)
+
+    def projects(self) -> FakeCertificateManager:
+        return self
+
+    def locations(self) -> FakeCertificateManager:
+        return self
+
+    def certificates(self) -> _CertificatesNs:
+        return self._certs
+
+
+class FakeCompute:
+    """Fakes ``compute.globalAddresses().get(project=, address=).execute()``."""
+
+    def __init__(self, status: str = "RESERVED", error: HttpError | None = None) -> None:
+        self._status = status
+        self._error = error
+
+    def globalAddresses(self) -> FakeCompute:  # noqa: N802 - matches API method name
+        return self
+
+    def get(self, project: str, address: str) -> _Request:
+        return _Request(result={"status": self._status}, error=self._error)
+
+
 @pytest.fixture
 def config() -> Config:
     """A representative Config for the checks under test."""
@@ -194,5 +259,6 @@ def cluster_config(config: Config) -> Config:
     return dataclasses.replace(
         config,
         region="us-central1",
+        environment="dev",
         node_service_account_email="gke-node@example.iam.gserviceaccount.com",
     )

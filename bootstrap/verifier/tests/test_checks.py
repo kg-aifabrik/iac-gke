@@ -9,7 +9,16 @@ from __future__ import annotations
 
 import dataclasses
 
-from conftest import FakeIam, FakeKms, FakeResourceManager, FakeServiceUsage, http_error
+from conftest import (
+    FakeCertificateManager,
+    FakeCompute,
+    FakeIam,
+    FakeKms,
+    FakePrivateCa,
+    FakeResourceManager,
+    FakeServiceUsage,
+    http_error,
+)
 from setup_doctor import checks
 from setup_doctor.config import CMEK_ROLE
 from setup_doctor.models import Status
@@ -352,5 +361,112 @@ def test_cluster_apis_error_fails(cluster_config):
 
 def test_cluster_apis_not_configured_skips(config):
     result = checks.check_cluster_apis_enabled(FakeServiceUsage(), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- CAS certificate authorities (ingress) ---------------------------------
+
+
+def test_cas_cas_enabled_passes(cluster_config):
+    result = checks.check_cas_cas_enabled(FakePrivateCa(), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_cas_subordinate_disabled_fails(cluster_config):
+    pca = FakePrivateCa(states={"dev-subordinate": "DISABLED"})
+    result = checks.check_cas_cas_enabled(pca, cluster_config)
+    assert result.status is Status.FAIL
+    assert "dev-subordinate" in result.detail
+
+
+def test_cas_not_found_fails(cluster_config):
+    result = checks.check_cas_cas_enabled(FakePrivateCa(error=http_error(404)), cluster_config)
+    assert result.status is Status.FAIL
+
+
+def test_cas_permission_denied_skips(cluster_config):
+    result = checks.check_cas_cas_enabled(FakePrivateCa(error=http_error(403)), cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_cas_no_environment_skips(cluster_config):
+    no_env = dataclasses.replace(cluster_config, environment="")
+    result = checks.check_cas_cas_enabled(FakePrivateCa(), no_env)
+    assert result.status is Status.SKIP
+
+
+def test_cas_not_configured_skips(config):
+    result = checks.check_cas_cas_enabled(FakePrivateCa(), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- External managed certificate (ingress) --------------------------------
+
+
+def test_external_cert_active_passes(cluster_config):
+    result = checks.check_external_cert_active(
+        FakeCertificateManager(state="ACTIVE"), cluster_config
+    )
+    assert result.status is Status.PASS
+
+
+def test_external_cert_not_active_fails(cluster_config):
+    result = checks.check_external_cert_active(
+        FakeCertificateManager(state="PROVISIONING"), cluster_config
+    )
+    assert result.status is Status.FAIL
+    assert "ACTIVE" in result.detail
+
+
+def test_external_cert_not_found_fails(cluster_config):
+    result = checks.check_external_cert_active(
+        FakeCertificateManager(error=http_error(404)), cluster_config
+    )
+    assert result.status is Status.FAIL
+
+
+def test_external_cert_permission_denied_skips(cluster_config):
+    result = checks.check_external_cert_active(
+        FakeCertificateManager(error=http_error(403)), cluster_config
+    )
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_external_cert_not_configured_skips(config):
+    result = checks.check_external_cert_active(FakeCertificateManager(), config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+# --- External gateway IP (ingress) -----------------------------------------
+
+
+def test_gateway_ip_reserved_passes(cluster_config):
+    result = checks.check_gateway_ip_reserved(FakeCompute(status="RESERVED"), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_gateway_ip_in_use_passes(cluster_config):
+    result = checks.check_gateway_ip_reserved(FakeCompute(status="IN_USE"), cluster_config)
+    assert result.status is Status.PASS
+
+
+def test_gateway_ip_not_found_fails(cluster_config):
+    result = checks.check_gateway_ip_reserved(FakeCompute(error=http_error(404)), cluster_config)
+    assert result.status is Status.FAIL
+
+
+def test_gateway_ip_permission_denied_skips(cluster_config):
+    result = checks.check_gateway_ip_reserved(FakeCompute(error=http_error(403)), cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_gateway_ip_not_configured_skips(config):
+    result = checks.check_gateway_ip_reserved(FakeCompute(), config)
     assert result.status is Status.SKIP
     assert result.required is False

@@ -36,6 +36,9 @@ class Clients:
     serviceusage: Any
     resourcemanager: Any
     cloudkms: Any
+    privateca: Any
+    certificatemanager: Any
+    compute: Any
     session: AuthorizedSession
     credentials: Any
 
@@ -67,12 +70,20 @@ def build_clients() -> Clients:
         "cloudresourcemanager", "v3", http=_authorized_http(credentials), cache_discovery=False
     )
     cloudkms = build("cloudkms", "v1", http=_authorized_http(credentials), cache_discovery=False)
+    privateca = build("privateca", "v1", http=_authorized_http(credentials), cache_discovery=False)
+    certificatemanager = build(
+        "certificatemanager", "v1", http=_authorized_http(credentials), cache_discovery=False
+    )
+    compute = build("compute", "v1", http=_authorized_http(credentials), cache_discovery=False)
     session = AuthorizedSession(credentials)
     return Clients(
         iam=iam,
         serviceusage=serviceusage,
         resourcemanager=resourcemanager,
         cloudkms=cloudkms,
+        privateca=privateca,
+        certificatemanager=certificatemanager,
+        compute=compute,
         session=session,
         credentials=credentials,
     )

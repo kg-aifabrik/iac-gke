@@ -53,6 +53,11 @@ CONNECT_GATEWAY_ROLES: frozenset[str] = frozenset(
 # Default project-level role for the least-privilege node service account.
 DEFAULT_NODE_SA_ROLES: frozenset[str] = frozenset({"roles/container.defaultNodeServiceAccount"})
 
+# Ingress resource names (cluster mode), following the gke-gateway naming where
+# the external gateway is named "external".
+EXTERNAL_CERT_NAME = "external-cert"
+EXTERNAL_GATEWAY_ADDRESS = "external-gw"
+
 GITHUB_ISSUER_URI = "https://token.actions.githubusercontent.com"
 
 # Maps required environment variable (without prefix) -> Config attribute.
@@ -122,6 +127,7 @@ class Config:
     expected_node_sa_roles: frozenset[str] = DEFAULT_NODE_SA_ROLES
     kms_key_name: str = "cluster"
     cluster_required_apis: tuple[str, ...] = DEFAULT_CLUSTER_APIS
+    environment: str = ""
 
     @property
     def project_ref(self) -> str:
@@ -155,6 +161,21 @@ class Config:
             f"{self.project_ref}/locations/{self.region}"
             f"/keyRings/gke-{self.region}/cryptoKeys/{self.kms_key_name}"
         )
+
+    def cas_ca_resource(self, tier: str) -> str:
+        """Full resource name of a CAS certificate authority (tier = root | subordinate).
+
+        The private-ca module names both the pool and the CA ``<env>-<tier>``.
+        """
+        ca = f"{self.environment}-{tier}"
+        return (
+            f"{self.project_ref}/locations/{self.region}/caPools/{ca}/certificateAuthorities/{ca}"
+        )
+
+    @property
+    def external_certificate_resource(self) -> str:
+        """Full resource name of the external gateway's managed certificate (global)."""
+        return f"{self.project_ref}/locations/global/certificates/{EXTERNAL_CERT_NAME}"
 
     @classmethod
     def from_env(cls) -> Config:
@@ -198,4 +219,5 @@ class Config:
             region=_env("REGION"),
             node_service_account_email=_env("NODE_SERVICE_ACCOUNT"),
             expected_node_sa_roles=node_sa_roles,
+            environment=_env("ENVIRONMENT"),
         )

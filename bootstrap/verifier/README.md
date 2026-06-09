@@ -28,6 +28,9 @@ otherwise they SKIP, so a keyless-only run is unchanged:
 | `cmek-grants` | **Both** CMEK grants on the cluster key (GKE→secrets, Compute→disks) | SKIP (operator-only read) |
 | `node-sa-least-privilege` | The node SA holds **exactly** its expected project role(s) | SKIP (operator-only read) |
 | `connect-gateway-access` | The automation holds the Connect Gateway roles | SKIP (operator-only read) |
+| `cas-cas-enabled` | The CAS root + subordinate CAs exist and are ENABLED | SKIP (operator-only read) |
+| `external-cert-active` | The external gateway's managed certificate is **ACTIVE** | SKIP (operator-only read) |
+| `external-gateway-ip` | The external gateway's global static IP is reserved | SKIP (operator-only read) |
 
 A check returns **PASS**, **FAIL** (setup is wrong — fix it), or **SKIP** (the
 current identity intentionally lacks the read; not a failure). The process exits
@@ -49,6 +52,7 @@ non-zero only on a required FAIL.
 | `SETUP_DOCTOR_REGION` | no | Cluster region. **Setting it enables the cluster-setup checks** (and locates the `gke-<region>` KMS key) |
 | `SETUP_DOCTOR_NODE_SERVICE_ACCOUNT` | no | Node SA email whose project roles are audited (cluster mode) |
 | `SETUP_DOCTOR_EXPECTED_NODE_SA_ROLES` | no | Comma-separated exact role set for the node SA (defaults to `roles/container.defaultNodeServiceAccount`) |
+| `SETUP_DOCTOR_ENVIRONMENT` | no | Environment name (dev/stage/prod) — locates the `<env>-root` / `<env>-subordinate` CAS authorities for the `cas-cas-enabled` check |
 
 ## Use
 
