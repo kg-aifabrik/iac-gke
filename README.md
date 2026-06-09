@@ -1,34 +1,96 @@
 # iac-gke
 
-Infrastructure, policy, and automation for **cluster-ctrl** — how we build and
-run hardened Google Kubernetes Engine (GKE) clusters on Google Cloud. The
-design and requirements live in the companion repo
-[`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl) (`docs/`).
+Infrastructure, policy, and automation for **cluster-ctrl** — how the AiFabrik Site
+Reliability Engineering (SRE) team builds and runs hardened **Google Kubernetes Engine
+(GKE)** clusters on Google Cloud. Requirements, technology choices, and the technical design
+live in the companion repo [`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl)
+(`docs/`); this repo holds the Terraform, the in-cluster manifests, the keyless pipeline, and
+the verifier.
 
-This is the repository whose GitHub Actions automation is trusted to talk to
-Google Cloud (keylessly, via Workload Identity Federation). It is **private** by
-design.
+This is the repository whose GitHub Actions automation is trusted to reach Google Cloud
+**keylessly** — Workload Identity Federation (WIF), no stored keys. It is **private** by design.
+
+## Status
+
+| Milestone | Scope | State |
+|---|---|---|
+| **M0** — Verified keyless access | WIF + service-account impersonation + `setup-doctor` + a CI demo | ✅ closed |
+| **M1** — Cluster factory | a hardened, private, regional cluster as `account × environment × purpose` configuration | ✅ closed |
+| **M2** — Ingress and TLS | two gateways (internal + external), public + private (CAS) certificates, a baseline web application firewall | ✅ closed |
+| **M3** — Security hardening | image supply chain / Binary Authorization enforce, posture, namespace stamps, mTLS | 🔭 planned (#17) |
+
+Each milestone was built through the gated pipeline and proven against a real dev cluster, then
+torn down. Delivery, bring-up issues, and decisions for each are recorded in a per-milestone
+**retrospective** issue under its GitHub Milestone. Deferred work is tracked as open issues.
+
+## What's built
+
+A cluster is **chosen, not coded** — three coordinates: **account** (the project),
+**environment** (dev / stage / prod), and **purpose** (Fleet Operations Plane, Management Plane,
+…). One hardened recipe; sizing and options vary per (environment, purpose).
+
+- **Cluster** — private, regional, a DNS-only control-plane endpoint (no public application
+  programming interface (API) server), Dataplane V2, shielded + Container-Optimized OS nodes,
+  Workload Identity, Customer-Managed Encryption Keys (CMEK) for secrets and disks, Binary
+  Authorization, managed Prometheus, and fleet membership.
+- **Network** — a custom Virtual Private Cloud, alias-IP Pod/Service ranges, Private Google
+  Access, an optional Cloud Network Address Translation (NAT), and a proxy-only subnet for the
+  internal gateway.
+- **Supply chain** — Artifact Registry (a private repository + a Docker Hub pull-through proxy),
+  a repository-scoped node reader, and a Binary Authorization policy.
+- **Access** — no public endpoint; operators and automation reach the cluster only through
+  **Connect Gateway** (Google Identity and Access Management (IAM) + in-cluster role-based access
+  control).
+- **Ingress + TLS** — two gateways per cluster (internal `gke-l7-rilb`, external global). Public
+  endpoints use Certificate Manager managed certificates; internal endpoints use a private
+  Certificate Authority in Certificate Authority Service (CAS) via cert-manager / google-cas-issuer
+  / trust-manager. A baseline Cloud Armor policy fronts the external edge.
 
 ## Layout
 
 ```
+terraform/
+  modules/   project-foundation · network · supply-chain · gke-cluster · access ·
+             private-ca · gke-gateway · cluster-stack (the per-purpose composition)
+  envs/dev/  foundation (per project) · fop (the dev Fleet-Operations-Plane cluster)
+k8s/platform/  pinned in-cluster TLS add-ons (cert-manager / google-cas-issuer / trust-manager)
+examples/      runnable, hardened reference workloads (01–06) + validate.sh (end-user checks)
 bootstrap/
-  verifier/        setup-doctor — verifies the keyless-access setup (FND-2)
+  setup-keyless-access.sh     M0 one-time keyless setup (human-run)
+  setup-build-foundation.sh   Terraform state bucket + build-role elevation (human-run)
+  verifier/                   setup-doctor — preflight checks (keyless + cluster + ingress)
 docs/
-  runbooks/        one-time, human-run setup procedures
+  plans/           per-milestone implementation plans
+  runbooks/        one-time, human-run procedures (keyless setup; M1 bring-up)
+  implementation/  cluster-build.md — "how it was built", operator-facing
 .github/workflows/
-  verify-access.yml  Milestone 0 demo: keyless auth + setup-doctor
+  verify-access.yml                    keyless auth + setup-doctor (the M0 demo, kept green)
+  terraform-{plan,apply,destroy}.yml   gated, keyless plan / apply / destroy
 ```
 
-## Milestone 0 — Verified keyless access
+## How it's operated
 
-The first slice: prove this repo's automation can reach the dev project with no
-stored credentials, and verify the setup is correct and least-privilege.
+1. **One-time bootstraps** (human-run, need project admin):
+   - `bootstrap/setup-keyless-access.sh` — the WIF pool/provider, the automation service account,
+     and the repository variables.
+   - `bootstrap/setup-build-foundation.sh` — the versioned Terraform state bucket and the
+     least-privilege build roles.
+2. **GitHub setup** — a `dev` Environment whose required reviewers are the SRE approvers (the
+   approval gate), plus repository variables (`GCP_*`, `WIF_*`, `SRE_OPERATOR_MEMBERS`).
+3. **Build or change** — a pull request triggers `terraform-plan` (the plan is posted to the PR);
+   then `terraform-apply` is dispatched per root (`foundation`, then `fop`), an SRE approves the
+   `dev` Environment, the **saved** plan applies, and the in-cluster manifests are applied over
+   Connect Gateway. `terraform-destroy` tears a root down (also gated).
+4. **Verify** — `setup-doctor` (preflight) and `examples/validate.sh` (end-user: an HTTP 200 over
+   both gateways, an encrypted volume that persists, an Artifact Registry pull, and a Workload
+   Identity secret read).
 
-1. Run [`bootstrap/setup-keyless-access.sh`](bootstrap/setup-keyless-access.sh) — it
-   prompts for inputs, performs the one-time setup idempotently, publishes the
-   repository variables, and runs [`setup-doctor`](bootstrap/verifier/) to verify.
-   (See [`docs/runbooks/01-keyless-access-setup.md`](docs/runbooks/01-keyless-access-setup.md)
-   for the manual steps and the rationale.)
-2. The **Verify keyless access** workflow then demonstrates keyless auth in CI —
-   a green run is the deliverable.
+Account and project values stay out of git (supplied at `init`/apply); each root keeps its own
+state under a prefix (`env/dev/foundation`, `env/dev/fop`).
+
+## Where the *why* lives
+
+- **Design + decisions** — cluster-ctrl `docs/designs/google-cloud-design.md`, `docs/adr/`, and
+  `docs/{requirements,technology-choices,security-requirements}.md`.
+- **Plans** — `docs/plans/`. **Build narrative** — `docs/implementation/cluster-build.md`.
+- **Bring-up + retrospectives** — `docs/runbooks/` and the per-milestone retrospective issues.
