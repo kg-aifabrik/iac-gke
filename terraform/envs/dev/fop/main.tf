@@ -23,10 +23,15 @@ module "stack" {
   kms_key_id                 = data.terraform_remote_state.foundation.outputs.kms_crypto_key_id
   node_service_account_email = data.terraform_remote_state.foundation.outputs.node_service_account_email
 
-  # Sizing: smallest viable for dev — one e2-medium per zone across three zones
-  # (the stack defaults to the region's first three zones), general pool only.
+  # Sizing: smallest viable for dev — e2-medium across three zones (the stack
+  # defaults to the region's first three), general pool only, autoscaling
+  # between 1 and 2 nodes per zone (3-6 total) so scale-out is exercised while
+  # the ceiling stays cheap. BALANCED keeps zones even (ADR-0007).
   general_machine_type = "e2-medium"
-  general_node_count   = 1
+  general_autoscaling = {
+    min_per_zone = 1
+    max_per_zone = 2
+  }
 
   # Dev enrolls in auto-upgrades within a weekend maintenance window; stage/prod
   # will hold upgrades and schedule them deliberately.

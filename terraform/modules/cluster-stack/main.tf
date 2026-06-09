@@ -163,6 +163,8 @@ module "cluster" {
   general_node_count   = var.general_node_count
   general_disk_size_gb = var.general_disk_size_gb
   general_spot         = var.general_spot
+  general_autoscaling  = var.general_autoscaling
+  autoscaling_profile  = var.autoscaling_profile
 
   enable_confidential_pool  = var.enable_confidential_pool
   confidential_machine_type = var.confidential_machine_type

@@ -86,6 +86,15 @@ resource "google_container_cluster" "this" {
     enabled = true
   }
 
+  # Cluster-autoscaler profile for the per-pool autoscalers. Node
+  # auto-provisioning stays off (enabled = false): every node comes from an
+  # explicitly defined hardened pool, never an autoscaler-invented shape
+  # (ADR-0007).
+  cluster_autoscaling {
+    enabled             = false
+    autoscaling_profile = var.autoscaling_profile
+  }
+
   # Enable the Gateway API for ingress (the chosen ingress, TC-6).
   gateway_api_config {
     channel = "CHANNEL_STANDARD"
@@ -129,10 +138,35 @@ resource "google_container_cluster" "this" {
 # --- General hardened node pool --------------------------------------------
 
 resource "google_container_node_pool" "general" {
-  project    = var.project_id
-  name       = "general"
-  cluster    = google_container_cluster.this.id
-  node_count = var.general_node_count
+  project = var.project_id
+  name    = "general"
+  cluster = google_container_cluster.this.id
+
+  # Fixed-size pools manage node_count; autoscaled pools must not (Terraform
+  # would fight the autoscaler on every apply), so the pool starts at the
+  # per-zone minimum and the autoscaler owns the count from there.
+  node_count         = var.general_autoscaling == null ? var.general_node_count : null
+  initial_node_count = var.general_autoscaling == null ? null : var.general_autoscaling.min_per_zone
+
+  # Per-zone bounds on a regional pool (total = value x zones); BALANCED keeps
+  # scale-out even across zones so a zone loss never strands a majority of
+  # capacity (ADR-0007). The autoscaler triggers on unschedulable pods.
+  dynamic "autoscaling" {
+    for_each = var.general_autoscaling == null ? [] : [var.general_autoscaling]
+    content {
+      min_node_count  = autoscaling.value.min_per_zone
+      max_node_count  = autoscaling.value.max_per_zone
+      location_policy = autoscaling.value.location_policy
+    }
+  }
+
+  # Pin GKE's default surge upgrade explicitly: one surge node at a time (in
+  # the zone being upgraded), zero unavailable — an upgrade never reduces
+  # capacity below steady state.
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
+  }
 
   management {
     auto_repair  = true
@@ -161,6 +195,12 @@ resource "google_container_node_pool" "general" {
       mode = "GKE_METADATA"
     }
   }
+
+  # initial_node_count only seeds the pool at creation, but it is a force-new
+  # field — without this, raising min_per_zone later would replace the pool.
+  lifecycle {
+    ignore_changes = [initial_node_count]
+  }
 }
 
 # --- Optional Confidential (memory-encrypting) node pool -------------------
@@ -171,6 +211,13 @@ resource "google_container_node_pool" "confidential" {
   name       = "confidential"
   cluster    = google_container_cluster.this.id
   node_count = var.confidential_node_count
+
+  # Fixed-size by design: the pool is opt-in and tainted; autoscaling it is
+  # added when a consumer exists (ADR-0007). Surge pinned like the general pool.
+  upgrade_settings {
+    max_surge       = 1
+    max_unavailable = 0
+  }
 
   management {
     auto_repair  = true

@@ -110,6 +110,36 @@ variable "general_spot" {
   default     = false
 }
 
+variable "general_autoscaling" {
+  description = "Autoscaling bounds for the general pool, PER ZONE (regional pool: total = value x zones, so the ceiling stays symmetric across zones). Null keeps a fixed-size pool of general_node_count. BALANCED spreads scale-out evenly across zones (ADR-0007)."
+  type = object({
+    min_per_zone    = number
+    max_per_zone    = number
+    location_policy = optional(string, "BALANCED")
+  })
+  default = null
+
+  validation {
+    condition = var.general_autoscaling == null ? true : (
+      var.general_autoscaling.min_per_zone >= 0 &&
+      var.general_autoscaling.max_per_zone >= var.general_autoscaling.min_per_zone &&
+      contains(["BALANCED", "ANY"], var.general_autoscaling.location_policy)
+    )
+    error_message = "general_autoscaling needs 0 <= min_per_zone <= max_per_zone and location_policy BALANCED or ANY."
+  }
+}
+
+variable "autoscaling_profile" {
+  description = "Cluster-autoscaler profile: BALANCED (default) or OPTIMIZE_UTILIZATION (denser bin-packing, opt-in). Applies to the per-pool autoscaler; node auto-provisioning stays off (ADR-0007)."
+  type        = string
+  default     = "BALANCED"
+
+  validation {
+    condition     = contains(["BALANCED", "OPTIMIZE_UTILIZATION"], var.autoscaling_profile)
+    error_message = "autoscaling_profile must be BALANCED or OPTIMIZE_UTILIZATION."
+  }
+}
+
 variable "enable_confidential_pool" {
   description = "Create a Confidential (memory-encrypting) node pool. Always on-demand."
   type        = bool

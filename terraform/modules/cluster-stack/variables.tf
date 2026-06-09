@@ -135,6 +135,22 @@ variable "general_spot" {
   default     = false
 }
 
+variable "general_autoscaling" {
+  description = "Autoscaling bounds for the general pool, per zone (null = fixed-size pool of general_node_count). See the gke-cluster module / ADR-0007."
+  type = object({
+    min_per_zone    = number
+    max_per_zone    = number
+    location_policy = optional(string, "BALANCED")
+  })
+  default = null
+}
+
+variable "autoscaling_profile" {
+  description = "Cluster-autoscaler profile (BALANCED or OPTIMIZE_UTILIZATION)."
+  type        = string
+  default     = "BALANCED"
+}
+
 variable "enable_confidential_pool" {
   description = "Create a Confidential (memory-encrypting) node pool."
   type        = bool

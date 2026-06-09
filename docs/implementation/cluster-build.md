@@ -100,6 +100,15 @@ sizing/options are inputs (per environment, per purpose).
   fleet membership (for Connect Gateway); deletion protection; maintenance window in dev.
 - **Node pools** — `general` (e2-medium, on-demand by default); optional `confidential`
   (memory-encrypting, always on-demand, tainted so only opted-in workloads land there).
+- **Autoscaling (ADR-0007)** — the general pool autoscales between **per-zone** min/max bounds
+  (`general_autoscaling`; null keeps a fixed pool of `general_node_count`). `BALANCED` location
+  policy spreads scale-out across zones; the cluster-autoscaler `autoscaling_profile` is an
+  input (`BALANCED` default). Node auto-provisioning stays **off** — every node comes from the
+  hardened pool template. When autoscaling, Terraform stops managing `node_count` (the
+  autoscaler owns it) and seeds the pool at the minimum; `initial_node_count` drift is ignored
+  so raising the minimum later never recreates the pool.
+- **Surge pinned** — `max_surge=1, max_unavailable=0` on both pools: upgrades replace one node
+  at a time in the zone being upgraded, so capacity never drops below steady state.
 
 ## Supply chain — `terraform/modules/supply-chain`
 
@@ -230,9 +239,9 @@ envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls th
   zones** (the region's first three, unless overridden), stamps consistent
   `environment/purpose/cluster` labels, and wires the six per-purpose modules. The hardening
   inside those modules is identical for every cluster; only the inputs differ.
-- **`envs/dev/fop` is thin** — it pins dev-FOP's shape (smallest sizing: one `e2-medium` per
-  zone × 3 zones, general pool only; `REGULAR` channel + a weekend maintenance window; not
-  deletion-protected because dev is torn down) and supplies only account/identity values.
+- **`envs/dev/fop` is thin** — it pins dev-FOP's shape (`e2-medium`, general pool only,
+  autoscaling 1–2 nodes per zone × 3 zones; `REGULAR` channel + a weekend maintenance window;
+  not deletion-protected because dev is torn down) and supplies only account/identity values.
   **Adding a purpose** = a sibling folder like this one with a different `purpose` and sizing.
 - **Account stays out of git** — the state-bucket name and project id are supplied at
   `init`/apply (`-backend-config`, `terraform.tfvars` (git-ignored), or `TF_VAR_*`), never
