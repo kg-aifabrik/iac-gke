@@ -14,6 +14,11 @@ Claude profile to make the conventions shared and explicit.
 - When a request is ambiguous about scope or placement (e.g. where a feature should
   live, or how broadly to apply a change), ask a brief clarifying question before
   implementing — don't guess or add extra "just in case."
+- Leave things better than you found them. When you notice drift (stale docs, comments,
+  issues, configs) or a clear improvement adjacent to the task at hand: if you're sure
+  it's correct, fix it and call it out; if you're unsure — ambiguous intent, a claim you
+  can't verify, or a scope/design judgment — ask first. (The bullet above still governs
+  the *requested* scope; this is about not leaving known drift unfixed.)
 
 # Engineering standards
 
