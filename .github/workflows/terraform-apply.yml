@@ -118,15 +118,30 @@ jobs:
           cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name)"
           gsa="$(terraform -chdir="$TF_ROOT" output -raw cert_manager_gsa_email)"
           terraform -chdir="$TF_ROOT" output -raw incluster_manifests > incluster.yaml
+          terraform -chdir="$TF_ROOT" output -raw priorityclass_manifests > priorityclasses.yaml
           gcloud container fleet memberships get-credentials "$cluster" --project "${TF_VAR_project_id}"
+
+          # The platform PriorityClasses must exist BEFORE the Helm installs
+          # below reference them — admission rejects pods whose
+          # priorityClassName doesn't exist (design §5).
+          kubectl apply -f priorityclasses.yaml
 
           # Install the pinned TLS controllers; their CRDs must exist before the
           # manifests below (GoogleCASClusterIssuer, Bundle) are applied. The
           # google-cas-issuer KSA is annotated for Workload Identity (no keys).
+          # cert-manager runs HA (2 replicas per component + PodDisruptionBudgets,
+          # platform-critical priority) so a node drain never stops issuance;
+          # trust-manager/google-cas-issuer stay single-replica deliberately — a
+          # PDB on one replica blocks drains, and renewals are asynchronous.
           helm repo add jetstack https://charts.jetstack.io --force-update
           helm repo update
           helm upgrade --install cert-manager jetstack/cert-manager \
-            -n cert-manager --create-namespace --version v1.16.2 --set crds.enabled=true --wait --timeout 600s
+            -n cert-manager --create-namespace --version v1.16.2 --set crds.enabled=true \
+            --set global.priorityClassName=platform-critical \
+            --set replicaCount=2 --set podDisruptionBudget.enabled=true \
+            --set webhook.replicaCount=2 --set webhook.podDisruptionBudget.enabled=true \
+            --set cainjector.replicaCount=2 --set cainjector.podDisruptionBudget.enabled=true \
+            --wait --timeout 600s
           helm upgrade --install trust-manager jetstack/trust-manager \
             -n cert-manager --version v0.13.0 --wait --timeout 600s
           helm upgrade --install google-cas-issuer jetstack/cert-manager-google-cas-issuer \

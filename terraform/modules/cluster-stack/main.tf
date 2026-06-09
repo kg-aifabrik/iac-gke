@@ -68,6 +68,26 @@ locals {
     })
   ]
 
+  # Platform PriorityClasses (design §5): three shared tiers so every team uses
+  # the same scale instead of inventing values; none is globalDefault, so
+  # nothing changes for pods that don't opt in. Rendered as a SEPARATE output
+  # too: the pipeline applies them before the Helm add-ons, because admission
+  # rejects a pod whose priorityClassName doesn't exist yet.
+  priorityclass_manifests = [
+    for pc in [
+      { name = "platform-critical", value = 900000000, description = "Platform add-ons (certificate issuance, trust distribution): schedules ahead of all workloads and may preempt them." },
+      { name = "workload-high", value = 1000000, description = "Production-serving workloads: schedules ahead of, and may preempt, default-tier pods under pressure." },
+      { name = "workload-default", value = 0, description = "Normal workloads — identical to an unlabeled pod; the explicit name keeps manifests self-documenting." },
+      ] : yamlencode({
+        apiVersion    = "scheduling.k8s.io/v1"
+        kind          = "PriorityClass"
+        metadata      = { name = pc.name, labels = { "app.kubernetes.io/managed-by" = "cluster-ctrl" } }
+        value         = pc.value
+        globalDefault = false
+        description   = pc.description
+    })
+  ]
+
   # The CAS root distributed to workloads: a source ConfigMap in the trust
   # namespace + a trust-manager Bundle that fans it out to every namespace. The
   # source ConfigMap (cas-root-ca) must be named differently from the Bundle
@@ -99,6 +119,7 @@ locals {
   # add-ons): namespaces, operator RBAC, the encrypted StorageClasses, the CAS
   # trust root + issuer + bundle, and the two gateways.
   incluster_manifests = join("\n---\n", concat(
+    local.priorityclass_manifests,
     local.namespace_manifests,
     [module.access.rbac_manifest],
     local.storageclass_manifests,

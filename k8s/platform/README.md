@@ -5,11 +5,16 @@ and the trust bundle that depend on them. The pipeline installs these over Conne
 after the cluster is up (design §8, ADR-0002). Versions are **pinned** for reproducibility —
 bump deliberately.
 
-| Add-on | Purpose | Pinned version |
-|---|---|---|
-| **cert-manager** | issues + renews certificates in-cluster | `v1.16.2` |
-| **google-cas-issuer** | cert-manager external issuer backed by Certificate Authority Service | `v0.11.0` |
-| **trust-manager** | distributes the CAS root bundle to namespaces | `v0.13.0` |
+| Add-on | Purpose | Pinned version | Availability |
+|---|---|---|---|
+| **cert-manager** | issues + renews certificates in-cluster | `v1.16.2` | **HA**: 2 replicas per component + PodDisruptionBudgets, `platform-critical` priority |
+| **google-cas-issuer** | cert-manager external issuer backed by Certificate Authority Service | `v0.11.0` | single replica (deliberate — see below) |
+| **trust-manager** | distributes the CAS root bundle to namespaces | `v0.13.0` | single replica (deliberate — see below) |
+
+cert-manager runs highly available because a node drain must never stop certificate
+issuance (design §5). trust-manager and google-cas-issuer stay single-replica on purpose: a
+PodDisruptionBudget on one replica blocks node drains, and a brief pause is tolerable
+because certificate renewal and bundle distribution are asynchronous.
 
 *(Confirm/bump exact versions at build.)*
 

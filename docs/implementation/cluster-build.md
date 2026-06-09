@@ -369,6 +369,12 @@ multi-doc YAML (`incluster_manifests`):
   `standard-rwo`); workloads opt in by name.
 - **Platform namespaces** — `gateway-system` plus the workload namespaces, each labelled so its
   HTTPRoutes may attach to the matching gateway (`ingress=external|internal`).
+- **PriorityClasses (design §5)** — three shared tiers (`platform-critical` / `workload-high` /
+  `workload-default`), none `globalDefault`. Applied **before** the Helm add-ons (separate
+  `priorityclass_manifests` output) because admission rejects pods whose priorityClassName
+  doesn't exist yet; cert-manager installs at `platform-critical` with 2 replicas per component
+  + PodDisruptionBudgets, while trust-manager/google-cas-issuer stay single-replica
+  deliberately (a PDB on one replica blocks drains; renewal is asynchronous).
 - **Gateways + TLS wiring** — the `fop` apply first Helm-installs the pinned TLS controllers
   (cert-manager, trust-manager, google-cas-issuer) so their custom resource definitions exist,
   then applies the two `Gateway`s with their redirect routes and SSL policies, the

@@ -32,8 +32,13 @@ output "gateway_members" {
 }
 
 output "incluster_manifests" {
-  description = "Multi-doc YAML the pipeline applies with kubectl after the cluster is reachable: namespaces, operator RBAC, encrypted StorageClass, CAS trust root + issuer + bundle, and the two gateways."
+  description = "Multi-doc YAML the pipeline applies with kubectl after the cluster is reachable: priority tiers, namespaces, operator RBAC, encrypted StorageClasses, CAS trust root + issuer + bundle, and the two gateways."
   value       = local.incluster_manifests
+}
+
+output "priorityclass_manifests" {
+  description = "The three platform PriorityClasses alone — applied BEFORE the Helm add-ons (admission rejects pods whose priorityClassName doesn't exist); also included in incluster_manifests (idempotent re-apply)."
+  value       = join("\n---\n", local.priorityclass_manifests)
 }
 
 output "external_gateway_ip" {

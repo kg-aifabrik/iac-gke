@@ -33,6 +33,11 @@ output "incluster_manifests" {
   value       = module.stack.incluster_manifests
 }
 
+output "priorityclass_manifests" {
+  description = "Platform PriorityClasses — applied before the Helm add-ons."
+  value       = module.stack.priorityclass_manifests
+}
+
 output "cert_manager_gsa_email" {
   description = "Annotate the google-cas-issuer KSA with this at Helm install (Workload Identity)."
   value       = module.stack.cert_manager_gsa_email
