@@ -1,10 +1,11 @@
 # trust-manager Bundle: distribute the CAS root to every namespace so workload
 # clients can verify internal endpoints served by CAS-issued certificates.
 #
-# The source ConfigMap `cas-root` (key ca.crt = the root PEM) is rendered by the
-# env wiring from the private-ca module's root_ca_pem output. trust-manager syncs
-# the bundle out as a ConfigMap named `cas-root` (key ca.crt) in each namespace;
-# with no namespaceSelector it targets all namespaces.
+# The source ConfigMap `cas-root-ca` (key ca.crt = the root PEM) is rendered by
+# the env wiring from the private-ca module's root_ca_pem output. trust-manager
+# syncs the bundle out as a ConfigMap named after the Bundle (`cas-root`, key
+# ca.crt) in each namespace; with no namespaceSelector it targets all of them.
+# The source name must differ from the Bundle/target name.
 apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
 metadata:
@@ -12,7 +13,7 @@ metadata:
 spec:
   sources:
     - configMap:
-        name: cas-root
+        name: cas-root-ca
         key: ca.crt
   target:
     configMap:

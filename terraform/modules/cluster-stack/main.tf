@@ -62,11 +62,14 @@ locals {
   ]
 
   # The CAS root distributed to workloads: a source ConfigMap in the trust
-  # namespace + a trust-manager Bundle that fans it out to every namespace.
+  # namespace + a trust-manager Bundle that fans it out to every namespace. The
+  # source ConfigMap (cas-root-ca) must be named differently from the Bundle
+  # (cas-root) — trust-manager names the *target* ConfigMaps after the Bundle and
+  # rejects a source that equals the target.
   cas_root_configmap = yamlencode({
     apiVersion = "v1"
     kind       = "ConfigMap"
-    metadata   = { name = "cas-root", namespace = "cert-manager" }
+    metadata   = { name = "cas-root-ca", namespace = "cert-manager" }
     data       = { "ca.crt" = join("", module.private_ca.root_ca_pem) }
   })
   cas_cluster_issuer = yamlencode({
@@ -80,7 +83,7 @@ locals {
     kind       = "Bundle"
     metadata   = { name = "cas-root" }
     spec = {
-      sources = [{ configMap = { name = "cas-root", key = "ca.crt" } }]
+      sources = [{ configMap = { name = "cas-root-ca", key = "ca.crt" } }]
       target  = { configMap = { key = "ca.crt" } }
     }
   })

@@ -36,19 +36,20 @@ locals {
           port          = 80
           allowedRoutes = { namespaces = { from = "Selector", selector = { matchLabels = local.route_label } } }
         },
-        {
-          name          = "https"
-          protocol      = "HTTPS"
-          port          = 443
-          hostname      = var.hostname
-          allowedRoutes = { namespaces = { from = "Selector", selector = { matchLabels = local.route_label } } }
-          # External: certs come from the certmap annotation (no certificateRefs).
-          # Internal: from the CAS-issued Secret cert-manager populates.
-          tls = merge(
-            { mode = "Terminate" },
-            local.is_external ? {} : { certificateRefs = [{ kind = "Secret", name = local.tls_secret, group = "" }] },
-          )
-        },
+        merge(
+          {
+            name          = "https"
+            protocol      = "HTTPS"
+            port          = 443
+            hostname      = var.hostname
+            allowedRoutes = { namespaces = { from = "Selector", selector = { matchLabels = local.route_label } } }
+          },
+          # External: TLS is supplied by the certmap annotation, so the HTTPS
+          # listener carries NO tls block (a tls block with mode Terminate would
+          # require certificateRefs and be rejected). Internal: terminate with the
+          # CAS-issued Secret cert-manager populates.
+          local.is_external ? {} : { tls = { mode = "Terminate", certificateRefs = [{ kind = "Secret", name = local.tls_secret, group = "" }] } },
+        ),
       ]
     }
   }
