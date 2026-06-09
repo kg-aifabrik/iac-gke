@@ -190,10 +190,14 @@ check_workload_identity() {
   if ! kubectl -n "${NS}" wait --for=condition=Ready pod/wi-secret-reader --timeout=180s; then
     record FAIL workload-identity "pod did not become ready"; return
   fi
-  # The pod prints the secret on startup; give it a moment, then read the logs.
-  sleep 5
-  local logs
-  logs="$(kubectl -n "${NS}" logs wi-secret-reader 2>/dev/null || true)"
+  # The pod retries the read while the WI binding propagates; poll its logs for
+  # the secret value until it appears (~5 min).
+  local logs=""
+  for _ in $(seq 1 30); do
+    logs="$(kubectl -n "${NS}" logs wi-secret-reader 2>/dev/null || true)"
+    grep -q "${SECRET_VALUE}" <<<"${logs}" && break
+    sleep 10
+  done
   if grep -q "${SECRET_VALUE}" <<<"${logs}"; then
     record PASS workload-identity "pod read the secret via its own Google identity"
   else

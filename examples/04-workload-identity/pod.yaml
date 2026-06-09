@@ -21,7 +21,20 @@ spec:
       command:
         - sh
         - -c
-        - "gcloud secrets versions access latest --secret=${SECRET_NAME} --project=${PROJECT_ID}; echo; sleep 3600"
+        # Retry the read while the Workload Identity binding (created moments
+        # earlier) propagates, then stay running so the validation can read the
+        # logs. $(seq)/$i run in this pod, not the host (the validator only
+        # substitutes ${SECRET_NAME}/${PROJECT_ID}).
+        - |
+          for i in $(seq 1 30); do
+            if gcloud secrets versions access latest --secret=${SECRET_NAME} --project=${PROJECT_ID}; then
+              break
+            fi
+            echo "waiting for Workload Identity to propagate ($i)..."
+            sleep 10
+          done
+          echo
+          sleep 3600
       env:
         # gcloud writes its config under $HOME; keep it on a writable emptyDir
         # so the root filesystem can stay read-only.
