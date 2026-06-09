@@ -19,3 +19,8 @@ output "cert_manager_gsa_email" {
   description = "Google service account google-cas-issuer impersonates; annotate its Kubernetes service account with this."
   value       = google_service_account.cert_manager.email
 }
+
+output "root_ca_pem" {
+  description = "PEM of the root CA certificate — the trust anchor distributed to browsers (MDM) and to workloads (trust-manager Bundle)."
+  value       = google_privateca_certificate_authority.root.pem_ca_certificates
+}

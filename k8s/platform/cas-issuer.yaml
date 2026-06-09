@@ -1,0 +1,14 @@
+# cert-manager cluster issuer backed by Certificate Authority Service (CAS).
+# google-cas-issuer authenticates via the cert-manager-google-cas-issuer KSA's
+# Workload Identity (annotated at Helm install with the CAS service account), so
+# no keys are stored. Placeholders are substituted by the pipeline from the
+# private-ca / cluster Terraform outputs.
+apiVersion: cas-issuer.jetstack.io/v1beta1
+kind: GoogleCASClusterIssuer
+metadata:
+  name: cas-issuer
+spec:
+  project: ${PROJECT_ID}
+  location: ${GCP_REGION}
+  # The subordinate CA pool — leaves are issued from here, never the root.
+  caPoolId: ${CAS_POOL}

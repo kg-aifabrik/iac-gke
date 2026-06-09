@@ -81,7 +81,7 @@ locals {
     spec = {
       secretName = local.tls_secret
       dnsNames   = [var.hostname]
-      issuerRef  = { name = var.cas_cluster_issuer, kind = "ClusterIssuer", group = "cert-manager.io" }
+      issuerRef  = { name = var.cas_cluster_issuer, kind = "GoogleCASClusterIssuer", group = "cas-issuer.jetstack.io" }
       privateKey = { algorithm = "RSA", size = 2048 }
       usages     = ["server auth", "digital signature", "key encipherment"]
     }
