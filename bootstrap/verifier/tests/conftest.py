@@ -238,6 +238,90 @@ class FakeCompute:
         return _Request(result={"status": self._status}, error=self._error)
 
 
+class FakeContainer:
+    """Fakes ``container.projects().locations().clusters().nodePools().get()``."""
+
+    def __init__(self, pool: dict | None = None, error: HttpError | None = None) -> None:
+        self._pool = pool if pool is not None else {}
+        self._error = error
+
+    def projects(self) -> FakeContainer:
+        return self
+
+    def locations(self) -> FakeContainer:
+        return self
+
+    def clusters(self) -> FakeContainer:
+        return self
+
+    def nodePools(self) -> FakeContainer:  # noqa: N802 - matches API method name
+        return self
+
+    def get(self, name: str) -> _Request:
+        return _Request(result=self._pool, error=self._error)
+
+
+class FakeGkeBackup:
+    """Fakes ``gkebackup.projects().locations().backupPlans().get()``."""
+
+    def __init__(self, plan: dict | None = None, error: HttpError | None = None) -> None:
+        self._plan = plan if plan is not None else {"state": "READY"}
+        self._error = error
+
+    def projects(self) -> FakeGkeBackup:
+        return self
+
+    def locations(self) -> FakeGkeBackup:
+        return self
+
+    def backupPlans(self) -> FakeGkeBackup:  # noqa: N802 - matches API method name
+        return self
+
+    def get(self, name: str) -> _Request:
+        return _Request(result=self._plan, error=self._error)
+
+
+class _RrsetsNs:
+    def __init__(self, records: set[str], error: HttpError | None) -> None:
+        self._records = records
+        self._error = error
+
+    def get(self, project: str, managedZone: str, name: str, type: str) -> _Request:  # noqa: A002,N803
+        if self._error is not None:
+            return _Request(error=self._error)
+        if name in self._records:
+            return _Request(result={"name": name, "type": type})
+        return _Request(error=http_error(404))
+
+
+class FakeDns:
+    """Fakes Cloud DNS zone + record-set reads.
+
+    ``records`` holds the record names (with trailing dot) that exist; lookups
+    for anything else return 404, mimicking ``resourceRecordSets.get``.
+    """
+
+    def __init__(
+        self,
+        zone: dict | None = None,
+        records: set[str] | None = None,
+        zone_error: HttpError | None = None,
+        record_error: HttpError | None = None,
+    ) -> None:
+        self._zone = zone if zone is not None else {"visibility": "private"}
+        self._zone_error = zone_error
+        self._rrsets = _RrsetsNs(records or set(), record_error)
+
+    def managedZones(self) -> FakeDns:  # noqa: N802 - matches API method name
+        return self
+
+    def get(self, project: str, managedZone: str) -> _Request:  # noqa: N803 - matches API
+        return _Request(result=self._zone, error=self._zone_error)
+
+    def resourceRecordSets(self) -> _RrsetsNs:  # noqa: N802 - matches API method name
+        return self._rrsets
+
+
 @pytest.fixture
 def config() -> Config:
     """A representative Config for the checks under test."""
@@ -261,4 +345,19 @@ def cluster_config(config: Config) -> Config:
         region="us-central1",
         environment="dev",
         node_service_account_email="gke-node@example.iam.gserviceaccount.com",
+    )
+
+
+@pytest.fixture
+def ha_config(cluster_config: Config) -> Config:
+    """A Config with the Milestone-3 high-availability expectations set."""
+    return dataclasses.replace(
+        cluster_config,
+        cluster_name="dev-fop",
+        autoscaling_min_per_zone=1,
+        autoscaling_max_per_zone=2,
+        external_hostnames=("app.dev.arthos.app", "hello.dev.arthos.app"),
+        internal_hostnames=("hello.dev.aifabrik.com", "tools.dev.aifabrik.com"),
+        internal_zone_domain="dev.aifabrik.com",
+        public_zone_domain="dev.arthos.app",
     )

@@ -12,6 +12,9 @@ import dataclasses
 from conftest import (
     FakeCertificateManager,
     FakeCompute,
+    FakeContainer,
+    FakeDns,
+    FakeGkeBackup,
     FakeIam,
     FakeKms,
     FakePrivateCa,
@@ -406,31 +409,29 @@ def test_cas_not_configured_skips(config):
 # --- External managed certificate (ingress) --------------------------------
 
 
-def test_external_cert_active_passes(cluster_config):
-    result = checks.check_external_cert_active(
-        FakeCertificateManager(state="ACTIVE"), cluster_config
-    )
+def test_external_cert_active_passes(ha_config):
+    result = checks.check_external_cert_active(FakeCertificateManager(state="ACTIVE"), ha_config)
     assert result.status is Status.PASS
 
 
-def test_external_cert_not_active_fails(cluster_config):
+def test_external_cert_not_active_fails(ha_config):
     result = checks.check_external_cert_active(
-        FakeCertificateManager(state="PROVISIONING"), cluster_config
+        FakeCertificateManager(state="PROVISIONING"), ha_config
     )
     assert result.status is Status.FAIL
     assert "ACTIVE" in result.detail
 
 
-def test_external_cert_not_found_fails(cluster_config):
+def test_external_cert_not_found_fails(ha_config):
     result = checks.check_external_cert_active(
-        FakeCertificateManager(error=http_error(404)), cluster_config
+        FakeCertificateManager(error=http_error(404)), ha_config
     )
     assert result.status is Status.FAIL
 
 
-def test_external_cert_permission_denied_skips(cluster_config):
+def test_external_cert_permission_denied_skips(ha_config):
     result = checks.check_external_cert_active(
-        FakeCertificateManager(error=http_error(403)), cluster_config
+        FakeCertificateManager(error=http_error(403)), ha_config
     )
     assert result.status is Status.SKIP
     assert result.required is False
@@ -440,6 +441,12 @@ def test_external_cert_not_configured_skips(config):
     result = checks.check_external_cert_active(FakeCertificateManager(), config)
     assert result.status is Status.SKIP
     assert result.required is False
+
+
+def test_external_cert_no_hostnames_skips(cluster_config):
+    result = checks.check_external_cert_active(FakeCertificateManager(), cluster_config)
+    assert result.status is Status.SKIP
+    assert "EXTERNAL_HOSTNAMES" in result.detail
 
 
 # --- External gateway IP (ingress) -----------------------------------------
@@ -470,3 +477,150 @@ def test_gateway_ip_not_configured_skips(config):
     result = checks.check_gateway_ip_reserved(FakeCompute(), config)
     assert result.status is Status.SKIP
     assert result.required is False
+
+
+# --- Node-pool autoscaling (high availability) ------------------------------
+
+GOOD_POOL = {
+    "autoscaling": {
+        "enabled": True,
+        "minNodeCount": 1,
+        "maxNodeCount": 2,
+        "locationPolicy": "BALANCED",
+    }
+}
+
+
+def test_autoscaling_expected_bounds_pass(ha_config):
+    result = checks.check_node_pool_autoscaling(FakeContainer(pool=GOOD_POOL), ha_config)
+    assert result.status is Status.PASS
+
+
+def test_autoscaling_disabled_fails(ha_config):
+    result = checks.check_node_pool_autoscaling(
+        FakeContainer(pool={"autoscaling": {"enabled": False}}), ha_config
+    )
+    assert result.status is Status.FAIL
+    assert "disabled" in result.detail
+
+
+def test_autoscaling_wrong_bounds_fail(ha_config):
+    pool = {
+        "autoscaling": {
+            "enabled": True,
+            "minNodeCount": 2,
+            "maxNodeCount": 5,
+            "locationPolicy": "ANY",
+        }
+    }
+    result = checks.check_node_pool_autoscaling(FakeContainer(pool=pool), ha_config)
+    assert result.status is Status.FAIL
+    assert "min" in result.detail and "BALANCED" in result.detail
+
+
+def test_autoscaling_pool_missing_fails(ha_config):
+    result = checks.check_node_pool_autoscaling(FakeContainer(error=http_error(404)), ha_config)
+    assert result.status is Status.FAIL
+
+
+def test_autoscaling_permission_denied_skips(ha_config):
+    result = checks.check_node_pool_autoscaling(FakeContainer(error=http_error(403)), ha_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_autoscaling_not_configured_skips(cluster_config):
+    result = checks.check_node_pool_autoscaling(FakeContainer(pool=GOOD_POOL), cluster_config)
+    assert result.status is Status.SKIP
+
+
+# --- Backup plan (high availability) ----------------------------------------
+
+
+def test_backup_plan_ready_passes(ha_config):
+    plan = {
+        "state": "READY",
+        "backupSchedule": {"cronSchedule": "0 3 * * *"},
+        "retentionPolicy": {"backupRetainDays": 3},
+    }
+    result = checks.check_backup_plan(FakeGkeBackup(plan=plan), ha_config)
+    assert result.status is Status.PASS
+    assert "0 3 * * *" in result.detail
+
+
+def test_backup_plan_not_ready_fails(ha_config):
+    result = checks.check_backup_plan(FakeGkeBackup(plan={"state": "FAILED"}), ha_config)
+    assert result.status is Status.FAIL
+
+
+def test_backup_plan_missing_fails(ha_config):
+    result = checks.check_backup_plan(FakeGkeBackup(error=http_error(404)), ha_config)
+    assert result.status is Status.FAIL
+
+
+def test_backup_plan_permission_denied_skips(ha_config):
+    result = checks.check_backup_plan(FakeGkeBackup(error=http_error(403)), ha_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_backup_plan_not_configured_skips(cluster_config):
+    result = checks.check_backup_plan(FakeGkeBackup(), cluster_config)
+    assert result.status is Status.SKIP
+
+
+# --- DNS zones (high availability) ------------------------------------------
+
+
+def test_private_zone_with_all_records_passes(ha_config):
+    dns = FakeDns(
+        zone={"visibility": "private"},
+        records={"hello.dev.aifabrik.com.", "tools.dev.aifabrik.com."},
+    )
+    result = checks.check_private_dns_zone(dns, ha_config)
+    assert result.status is Status.PASS
+
+
+def test_private_zone_missing_record_fails(ha_config):
+    dns = FakeDns(zone={"visibility": "private"}, records={"hello.dev.aifabrik.com."})
+    result = checks.check_private_dns_zone(dns, ha_config)
+    assert result.status is Status.FAIL
+    assert "tools.dev.aifabrik.com" in result.detail
+
+
+def test_private_zone_wrong_visibility_fails(ha_config):
+    dns = FakeDns(zone={"visibility": "public"}, records=set())
+    result = checks.check_private_dns_zone(dns, ha_config)
+    assert result.status is Status.FAIL
+    assert "visibility" in result.detail
+
+
+def test_private_zone_missing_fails(ha_config):
+    result = checks.check_private_dns_zone(FakeDns(zone_error=http_error(404)), ha_config)
+    assert result.status is Status.FAIL
+
+
+def test_private_zone_not_configured_skips(cluster_config):
+    result = checks.check_private_dns_zone(FakeDns(), cluster_config)
+    assert result.status is Status.SKIP
+
+
+def test_public_zone_with_records_passes_and_lists_nameservers(ha_config):
+    dns = FakeDns(
+        zone={"visibility": "public", "nameServers": ["ns-cloud-a1.googledomains.com."]},
+        records={"app.dev.arthos.app.", "hello.dev.arthos.app."},
+    )
+    result = checks.check_public_dns_zone(dns, ha_config)
+    assert result.status is Status.PASS
+    assert "ns-cloud-a1" in result.detail
+
+
+def test_public_zone_not_managed_skips(cluster_config):
+    result = checks.check_public_dns_zone(FakeDns(), cluster_config)
+    assert result.status is Status.SKIP
+    assert result.required is False
+
+
+def test_public_zone_permission_denied_skips(ha_config):
+    result = checks.check_public_dns_zone(FakeDns(zone_error=http_error(403)), ha_config)
+    assert result.status is Status.SKIP

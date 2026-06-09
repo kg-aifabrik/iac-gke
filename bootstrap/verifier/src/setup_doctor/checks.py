@@ -528,45 +528,66 @@ def check_cas_cas_enabled(privateca: Any, config: Config) -> CheckResult:
 
 
 def check_external_cert_active(certificatemanager: Any, config: Config) -> CheckResult:
-    """The external gateway's Certificate Manager managed certificate is ACTIVE.
+    """Every external hostname's managed certificate is ACTIVE (per-host, ADR-0005).
 
-    A non-ACTIVE state almost always means the DNS-authorization record is not
-    yet in place or has not propagated. Operator-level read → HTTP 403 SKIP.
+    A non-ACTIVE state almost always means the hostname's DNS records (the
+    DNS-authorization CNAME, or the NS delegation when Cloud DNS manages the
+    public zone) are not in place or have not propagated. Operator-level read →
+    HTTP 403 SKIP.
     """
-    name = "external-cert-active"
+    name = "external-certs-active"
     if skip := _skip_if_no_cluster_mode(name, config):
         return skip
+    if not config.external_hostnames:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "external hostnames not set (SETUP_DOCTOR_EXTERNAL_HOSTNAMES)",
+            required=False,
+        )
     certs_api = certificatemanager.projects().locations().certificates()
-    try:
-        cert = certs_api.get(name=config.external_certificate_resource).execute(num_retries=3)
-    except HttpError as error:
-        status = _http_status(error)
-        if status == 403:
-            return CheckResult(
-                name,
-                Status.SKIP,
-                "insufficient permission to read Certificate Manager; run locally as an operator",
-                required=False,
+    not_active: list[str] = []
+    for hostname in config.external_hostnames:
+        try:
+            cert = certs_api.get(name=config.external_certificate_resource(hostname)).execute(
+                num_retries=3
             )
-        if status == 404:
-            return CheckResult(
-                name,
-                Status.FAIL,
-                "external managed certificate not found",
-                remediation="apply the fop root to create the certificate",
-            )
-        return CheckResult(name, Status.FAIL, f"error reading the certificate (HTTP {status})")
+        except HttpError as error:
+            status = _http_status(error)
+            if status == 403:
+                return CheckResult(
+                    name,
+                    Status.SKIP,
+                    "insufficient permission to read Certificate Manager; "
+                    "run locally as an operator",
+                    required=False,
+                )
+            if status == 404:
+                return CheckResult(
+                    name,
+                    Status.FAIL,
+                    f"managed certificate for {hostname} not found",
+                    remediation="apply the fop root to create the per-hostname certificates",
+                )
+            return CheckResult(name, Status.FAIL, f"error reading certificates (HTTP {status})")
+        state = (cert.get("managed") or {}).get("state", "")
+        if state != "ACTIVE":
+            not_active.append(f"{hostname}={state or 'unknown'}")
 
-    state = (cert.get("managed") or {}).get("state", "")
-    if state == "ACTIVE":
-        return CheckResult(name, Status.PASS, "external managed certificate is ACTIVE")
+    if not_active:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "certificates not ACTIVE: " + ", ".join(not_active),
+            remediation=(
+                "create the hostname's DNS records (or the one-time NS delegation when "
+                "manage_public_dns is on) and allow time to validate"
+            ),
+        )
     return CheckResult(
         name,
-        Status.FAIL,
-        f"external managed certificate state is {state or 'unknown'!r} (not ACTIVE)",
-        remediation=(
-            "add the DNS-authorization CNAME + the hostname A record and allow time to validate"
-        ),
+        Status.PASS,
+        f"all {len(config.external_hostnames)} external managed certificates are ACTIVE",
     )
 
 
@@ -604,3 +625,236 @@ def check_gateway_ip_reserved(compute: Any, config: Config) -> CheckResult:
     if status in ("RESERVED", "IN_USE"):
         return CheckResult(name, Status.PASS, f"external gateway IP reserved ({status})")
     return CheckResult(name, Status.FAIL, f"external gateway IP status is {status or 'unknown'!r}")
+
+
+def check_node_pool_autoscaling(container: Any, config: Config) -> CheckResult:
+    """The general pool autoscales with the expected per-zone bounds (ADR-0007).
+
+    Verifies enabled + min/max per zone + BALANCED location policy — the
+    high-availability contract: capacity follows demand within reviewed bounds,
+    spread evenly across zones.
+    """
+    name = "node-pool-autoscaling"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.cluster_name or config.autoscaling_min_per_zone is None:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "cluster/autoscaling expectations not set "
+            "(SETUP_DOCTOR_CLUSTER, SETUP_DOCTOR_AUTOSCALING_MIN/MAX)",
+            required=False,
+        )
+    pools_api = container.projects().locations().clusters().nodePools()
+    try:
+        pool = pools_api.get(name=config.node_pool_resource).execute(num_retries=3)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read the node pool; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                "general node pool not found",
+                remediation="apply the fop root to create the cluster and its pools",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the node pool (HTTP {status})")
+
+    autoscaling = pool.get("autoscaling") or {}
+    problems: list[str] = []
+    if not autoscaling.get("enabled"):
+        problems.append("autoscaling disabled")
+    else:
+        if autoscaling.get("minNodeCount") != config.autoscaling_min_per_zone:
+            problems.append(
+                f"min {autoscaling.get('minNodeCount')} != {config.autoscaling_min_per_zone}"
+            )
+        if autoscaling.get("maxNodeCount") != config.autoscaling_max_per_zone:
+            problems.append(
+                f"max {autoscaling.get('maxNodeCount')} != {config.autoscaling_max_per_zone}"
+            )
+        if autoscaling.get("locationPolicy") != "BALANCED":
+            problems.append(f"locationPolicy {autoscaling.get('locationPolicy')!r} != BALANCED")
+    if problems:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "; ".join(problems),
+            remediation="set general_autoscaling on the fop root and apply (ADR-0007)",
+        )
+    return CheckResult(
+        name,
+        Status.PASS,
+        f"general pool autoscales {config.autoscaling_min_per_zone}-"
+        f"{config.autoscaling_max_per_zone}/zone, BALANCED",
+    )
+
+
+def check_backup_plan(gkebackup: Any, config: Config) -> CheckResult:
+    """The cluster's Backup for GKE plan exists and is READY (ADR-0004)."""
+    name = "backup-plan"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.cluster_name:
+        return CheckResult(
+            name, Status.SKIP, "cluster not set (SETUP_DOCTOR_CLUSTER)", required=False
+        )
+    plans_api = gkebackup.projects().locations().backupPlans()
+    try:
+        plan = plans_api.get(name=config.backup_plan_resource).execute(num_retries=3)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read Backup for GKE; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                "backup plan not found",
+                remediation="apply the fop root (gke-backup module) to create the plan",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the backup plan (HTTP {status})")
+
+    state = plan.get("state", "")
+    if state != "READY":
+        return CheckResult(
+            name,
+            Status.FAIL,
+            f"backup plan state is {state or 'unknown'!r} (not READY)",
+            remediation="check the Backup for GKE agent on the cluster and the plan config",
+        )
+    cron = (plan.get("backupSchedule") or {}).get("cronSchedule", "?")
+    retain = (plan.get("retentionPolicy") or {}).get("backupRetainDays", "?")
+    return CheckResult(
+        name, Status.PASS, f"backup plan READY (schedule {cron!r}, retain {retain}d)"
+    )
+
+
+def _check_dns_zone(
+    dns: Any,
+    config: Config,
+    *,
+    name: str,
+    domain: str,
+    expected_visibility: str,
+    hostnames: tuple[str, ...],
+) -> CheckResult:
+    """Shared zone + per-hostname A-record verification (ADR-0006)."""
+    zones_api = dns.managedZones()
+    project = config.project_id or config.project_number
+    zone_name = config.dns_zone_name(domain)
+    try:
+        zone = zones_api.get(project=project, managedZone=zone_name).execute(num_retries=3)
+    except HttpError as error:
+        status = _http_status(error)
+        if status == 403:
+            return CheckResult(
+                name,
+                Status.SKIP,
+                "insufficient permission to read Cloud DNS; run locally as an operator",
+                required=False,
+            )
+        if status == 404:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                f"managed zone {zone_name} not found",
+                remediation="apply the fop root (dns-zones module) to create the zone",
+            )
+        return CheckResult(name, Status.FAIL, f"error reading the zone (HTTP {status})")
+
+    if zone.get("visibility") != expected_visibility:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            f"zone visibility is {zone.get('visibility')!r}, expected {expected_visibility!r}",
+        )
+
+    missing: list[str] = []
+    rrsets_api = dns.resourceRecordSets()
+    for hostname in hostnames:
+        try:
+            rrsets_api.get(
+                project=project, managedZone=zone_name, name=f"{hostname}.", type="A"
+            ).execute(num_retries=3)
+        except HttpError as error:
+            if _http_status(error) == 404:
+                missing.append(hostname)
+            else:
+                return CheckResult(
+                    name,
+                    Status.FAIL,
+                    f"error reading records (HTTP {_http_status(error)})",
+                )
+    if missing:
+        return CheckResult(
+            name,
+            Status.FAIL,
+            "A records missing for: " + ", ".join(missing),
+            remediation="apply the fop root — the dns-zones module renders one A record per host",
+        )
+    detail = f"{expected_visibility} zone {domain} serves {len(hostnames)} A record(s)"
+    if expected_visibility == "public":
+        # Surface the nameservers — the operator needs them for the one-time
+        # registrar delegation (and to re-check after a destroy + re-create).
+        detail += "; delegate NS to: " + ", ".join(zone.get("nameServers", []) or ["?"])
+    return CheckResult(name, Status.PASS, detail)
+
+
+def check_private_dns_zone(dns: Any, config: Config) -> CheckResult:
+    """The private zone resolves every internal hostname to the internal VIP's record."""
+    name = "private-dns-zone"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.internal_zone_domain:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "internal zone not set (SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN)",
+            required=False,
+        )
+    return _check_dns_zone(
+        dns,
+        config,
+        name=name,
+        domain=config.internal_zone_domain,
+        expected_visibility="private",
+        hostnames=config.internal_hostnames,
+    )
+
+
+def check_public_dns_zone(dns: Any, config: Config) -> CheckResult:
+    """The opt-in public zone exists and serves every external hostname's A record.
+
+    Runs only when manage_public_dns is on (the zone domain is configured);
+    NS delegation itself is verified by the operator with dig (runbook).
+    """
+    name = "public-dns-zone"
+    if skip := _skip_if_no_cluster_mode(name, config):
+        return skip
+    if not config.public_zone_domain:
+        return CheckResult(
+            name,
+            Status.SKIP,
+            "public zone not managed (SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN unset)",
+            required=False,
+        )
+    return _check_dns_zone(
+        dns,
+        config,
+        name=name,
+        domain=config.public_zone_domain,
+        expected_visibility="public",
+        hostnames=config.external_hostnames,
+    )

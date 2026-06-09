@@ -39,6 +39,9 @@ class Clients:
     privateca: Any
     certificatemanager: Any
     compute: Any
+    container: Any
+    gkebackup: Any
+    dns: Any
     session: AuthorizedSession
     credentials: Any
 
@@ -75,6 +78,9 @@ def build_clients() -> Clients:
         "certificatemanager", "v1", http=_authorized_http(credentials), cache_discovery=False
     )
     compute = build("compute", "v1", http=_authorized_http(credentials), cache_discovery=False)
+    container = build("container", "v1", http=_authorized_http(credentials), cache_discovery=False)
+    gkebackup = build("gkebackup", "v1", http=_authorized_http(credentials), cache_discovery=False)
+    dns = build("dns", "v1", http=_authorized_http(credentials), cache_discovery=False)
     session = AuthorizedSession(credentials)
     return Clients(
         iam=iam,
@@ -84,6 +90,9 @@ def build_clients() -> Clients:
         privateca=privateca,
         certificatemanager=certificatemanager,
         compute=compute,
+        container=container,
+        gkebackup=gkebackup,
+        dns=dns,
         session=session,
         credentials=credentials,
     )

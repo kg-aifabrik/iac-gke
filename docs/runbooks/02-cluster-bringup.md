@@ -90,6 +90,14 @@ export SETUP_DOCTOR_PROJECT_NUMBER=<num> SETUP_DOCTOR_PROJECT_ID=<DEV_PROJECT_ID
 export SETUP_DOCTOR_SERVICE_ACCOUNT=<automation-sa-email> SETUP_DOCTOR_POOL_ID=github
 export SETUP_DOCTOR_PROVIDER_ID=iac-gke SETUP_DOCTOR_REPOSITORY_ID=1260827836 SETUP_DOCTOR_REF=refs/heads/main
 export SETUP_DOCTOR_REGION=us-central1 SETUP_DOCTOR_NODE_SERVICE_ACCOUNT=<node-sa-email>
+export SETUP_DOCTOR_ENVIRONMENT=dev                       # CAS hierarchy checks
+# High-availability checks (Milestone 3) — values mirror the fop root:
+export SETUP_DOCTOR_CLUSTER=dev-fop
+export SETUP_DOCTOR_AUTOSCALING_MIN=1 SETUP_DOCTOR_AUTOSCALING_MAX=2
+export SETUP_DOCTOR_EXTERNAL_HOSTNAMES=app.dev.arthos.app,hello.dev.arthos.app
+export SETUP_DOCTOR_INTERNAL_HOSTNAMES=hello.dev.aifabrik.com,tools.dev.aifabrik.com
+export SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN=dev.aifabrik.com
+export SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN=dev.arthos.app     # only while manage_public_dns is on
 ( cd bootstrap/verifier && pip install -r requirements.lock && pip install -e . --no-deps && setup-doctor )
 ```
 

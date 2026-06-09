@@ -67,6 +67,11 @@ def run_checks(clients: clients_mod.Clients, config: Config) -> list[CheckResult
         checks.check_cas_cas_enabled(clients.privateca, config),
         checks.check_external_cert_active(clients.certificatemanager, config),
         checks.check_gateway_ip_reserved(clients.compute, config),
+        # High-availability checks (Milestone 3) — SKIP unless their inputs are set.
+        checks.check_node_pool_autoscaling(clients.container, config),
+        checks.check_backup_plan(clients.gkebackup, config),
+        checks.check_private_dns_zone(clients.dns, config),
+        checks.check_public_dns_zone(clients.dns, config),
     ]
 
 

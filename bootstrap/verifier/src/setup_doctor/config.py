@@ -54,9 +54,20 @@ CONNECT_GATEWAY_ROLES: frozenset[str] = frozenset(
 DEFAULT_NODE_SA_ROLES: frozenset[str] = frozenset({"roles/container.defaultNodeServiceAccount"})
 
 # Ingress resource names (cluster mode), following the gke-gateway naming where
-# the external gateway is named "external".
-EXTERNAL_CERT_NAME = "external-cert"
+# the external gateway is named "external". Certificates are per-hostname
+# (ADR-0005): external-cert-<hostname slug>.
+EXTERNAL_CERT_PREFIX = "external-cert"
 EXTERNAL_GATEWAY_ADDRESS = "external-gw"
+
+# Node pool and backup-plan names follow the gke-cluster / gke-backup modules.
+GENERAL_POOL_NAME = "general"
+BACKUP_PLAN_SUFFIX = "-daily"
+
+
+def _slug(hostname_or_domain: str) -> str:
+    """Resource-name slug for a hostname/domain (Google names take [a-z0-9-])."""
+    return hostname_or_domain.replace(".", "-")
+
 
 GITHUB_ISSUER_URI = "https://token.actions.githubusercontent.com"
 
@@ -128,6 +139,13 @@ class Config:
     kms_key_name: str = "cluster"
     cluster_required_apis: tuple[str, ...] = DEFAULT_CLUSTER_APIS
     environment: str = ""
+    cluster_name: str = ""
+    autoscaling_min_per_zone: int | None = None
+    autoscaling_max_per_zone: int | None = None
+    external_hostnames: tuple[str, ...] = ()
+    internal_hostnames: tuple[str, ...] = ()
+    internal_zone_domain: str = ""
+    public_zone_domain: str = ""
 
     @property
     def project_ref(self) -> str:
@@ -172,10 +190,32 @@ class Config:
             f"{self.project_ref}/locations/{self.region}/caPools/{ca}/certificateAuthorities/{ca}"
         )
 
+    def external_certificate_resource(self, hostname: str) -> str:
+        """Full resource name of a hostname's managed certificate (global, ADR-0005)."""
+        return (
+            f"{self.project_ref}/locations/global/certificates/"
+            f"{EXTERNAL_CERT_PREFIX}-{_slug(hostname)}"
+        )
+
     @property
-    def external_certificate_resource(self) -> str:
-        """Full resource name of the external gateway's managed certificate (global)."""
-        return f"{self.project_ref}/locations/global/certificates/{EXTERNAL_CERT_NAME}"
+    def node_pool_resource(self) -> str:
+        """Full resource name of the general node pool (autoscaling check)."""
+        return (
+            f"{self.project_ref}/locations/{self.region}"
+            f"/clusters/{self.cluster_name}/nodePools/{GENERAL_POOL_NAME}"
+        )
+
+    @property
+    def backup_plan_resource(self) -> str:
+        """Full resource name of the cluster's backup plan (gke-backup module naming)."""
+        return (
+            f"{self.project_ref}/locations/{self.region}"
+            f"/backupPlans/{self.cluster_name}{BACKUP_PLAN_SUFFIX}"
+        )
+
+    def dns_zone_name(self, domain: str) -> str:
+        """Cloud DNS managed-zone name for a domain (dns-zones module naming)."""
+        return _slug(domain)
 
     @classmethod
     def from_env(cls) -> Config:
@@ -205,6 +245,18 @@ class Config:
             else DEFAULT_NODE_SA_ROLES
         )
 
+        def _csv(name: str) -> tuple[str, ...]:
+            return tuple(h.strip() for h in _env(name).split(",") if h.strip())
+
+        def _int_or_none(name: str) -> int | None:
+            raw = _env(name)
+            if not raw:
+                return None
+            try:
+                return int(raw)
+            except ValueError as error:
+                raise ConfigError(f"{ENV_PREFIX}{name} must be an integer, got {raw!r}") from error
+
         return cls(
             project_number=values["project_number"],
             pool_id=values["pool_id"],
@@ -220,4 +272,11 @@ class Config:
             node_service_account_email=_env("NODE_SERVICE_ACCOUNT"),
             expected_node_sa_roles=node_sa_roles,
             environment=_env("ENVIRONMENT"),
+            cluster_name=_env("CLUSTER"),
+            autoscaling_min_per_zone=_int_or_none("AUTOSCALING_MIN"),
+            autoscaling_max_per_zone=_int_or_none("AUTOSCALING_MAX"),
+            external_hostnames=_csv("EXTERNAL_HOSTNAMES"),
+            internal_hostnames=_csv("INTERNAL_HOSTNAMES"),
+            internal_zone_domain=_env("INTERNAL_ZONE_DOMAIN"),
+            public_zone_domain=_env("PUBLIC_ZONE_DOMAIN"),
         )
