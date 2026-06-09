@@ -181,7 +181,48 @@ Compute also creates the Google-managed service agents (below).
 ### Node pools
 - A **general** hardened pool (machine type, disk, on-demand), plus an optional
   **Confidential** (memory-encrypting) pool per cluster — always **on-demand**, never spot
-  (spot Confidential nodes proved unreliable). **Autoscaling is deferred.**
+  (spot Confidential nodes proved unreliable).
+
+### Node autoscaling
+- The **general pool autoscales**: minimum and maximum nodes **per zone** are runtime inputs
+  (regional pool, so the ceiling is symmetric across the three zones), with `location_policy
+  = BALANCED` so scale-out adds nodes **evenly across zones** rather than piling into one. A
+  null autoscaling input keeps a fixed-size pool (the dev default before this milestone).
+- The cluster autoscaler triggers on **unschedulable pods**, not metrics; metric-driven
+  scaling is the Horizontal Pod Autoscaler at the workload layer (the reference examples show
+  it). The cluster-level **autoscaling profile** is an input (`BALANCED` default;
+  `OPTIMIZE_UTILIZATION` opt-in for denser bin-packing).
+- **Node auto-provisioning is not used** — it invents node shapes outside the hardened pool
+  template; every node comes from an explicitly defined pool (ADR-0007).
+- The Confidential pool stays **fixed-size** — it is opt-in and tainted; autoscaling it is
+  added when a consumer exists.
+- **Upgrade surge is pinned** (`max_surge = 1`, `max_unavailable = 0`): upgrades replace one
+  node at a time, zone by zone — the surge node is created in the same zone as the node being
+  drained, so capacity never drops below steady-state and zonal balance holds throughout.
+
+### Storage classes
+- Two platform StorageClasses, both CMEK-encrypted with the cluster key, both
+  `WaitForFirstConsumer`, neither marked the cluster default — workloads opt in by name:
+  - **`encrypted-rwo`** — zonal `pd-balanced`; the default choice for stateful workloads whose
+    availability story is replication at the application layer.
+  - **`encrypted-regional-rwo`** — **regional** `pd-balanced` (`replication-type:
+    regional-pd`), synchronously replicated across two zones; the volume survives a zone
+    failure and the pod reschedules into the surviving zone with its data. Costs ~2× the zonal
+    class, which is why it is a second named class and not the default (ADR-0008).
+
+### Scheduling tiers
+- Three platform **PriorityClasses**, rendered as in-cluster manifests; none is
+  `globalDefault`, so nothing changes for pods that do not opt in:
+  - **`platform-critical`** — the platform's own add-ons (cert-manager, trust-manager,
+    google-cas-issuer); schedules ahead of all workloads and may preempt them.
+  - **`workload-high`** — production-serving workloads; schedules ahead of, and may preempt,
+    default-tier pods under resource pressure.
+  - **`workload-default`** — value 0, identical to an unlabeled pod; the explicit name for
+    "normal" so manifests are self-documenting.
+- The platform add-ons run HA where it matters: **cert-manager runs 2 replicas with a
+  PodDisruptionBudget**; trust-manager and google-cas-issuer stay single-replica deliberately
+  (a PodDisruptionBudget on one replica blocks node drains, and a brief issuance pause is
+  tolerable because certificate renewal is asynchronous).
 
 ---
 
@@ -260,6 +301,21 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
 - **External (public) endpoints → Certificate Manager managed certificates.** Publicly trusted,
   free, auto-renewed, validated by **DNS authorization** (a CNAME in the domain). Every client
   already trusts the chain — nothing to distribute.
+- **Each gateway serves multiple hostnames under its domain** (e.g. `app.aifabrik.com` and
+  `billing.aifabrik.com` externally; `tools.dev.aifabrik.com` and `metrics.dev.aifabrik.com`
+  internally). Hostnames are a **list input** per gateway; no wildcard certificates are used
+  (ADR-0005):
+  - **External** — one DNS authorization, one managed certificate, and one certificate-map
+    *entry* **per hostname**; the certificate map stays singular and serves the right
+    certificate by Server Name Indication (SNI). Adding an app is one list entry plus the
+    hostname's DNS records.
+  - **Internal** — one **multi-SAN** CAS-issued certificate carrying every internal hostname
+    as an explicit Subject Alternative Name, written to a single Secret the listener
+    terminates with; cert-manager reissues it automatically when a name is added.
+  - Listeners match all attached hostnames; which routes may attach stays gated by the
+    namespace label (`ingress=external|internal`). Per-hostname route ownership inside the
+    allowed namespaces is a multi-tenancy control that arrives with the namespace stamps
+    (security milestone).
 - **Internal endpoints use a private certificate authority in Certificate Authority Service
   (CAS).** Internal hostnames are **private and are not published to Certificate Transparency
   logs**, so public certificates do not apply to them; the private CA's cost and trust
@@ -279,12 +335,20 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   cert-manager / `google-cas-issuer` / `trust-manager` with their Certificate resources are
   in-cluster manifests applied by the pipeline.
 
-### DNS (TC-8)
+### DNS (TC-8, ADR-0006)
 - **In-cluster** name resolution is GKE's built-in **CoreDNS** — nothing to deploy.
-- **Public** records are **SRE-managed** (not automated in-cluster): the external gateway's
-  hostname → its static IP, plus the Certificate Manager DNS-authorization record.
-- **Internal** hostnames resolve to the internal gateway's **private VIP** (split-horizon, or a
-  record pointing at the private address); the names stay private.
+- **Internal** hostnames resolve through a **Cloud DNS private zone** bound to the VPC
+  (e.g. `dev.aifabrik.com`), with an A record per internal hostname pointing at the internal
+  gateway's private VIP — Terraform-owned, created with the gateway. Private zones need no
+  registrar control, so internal names adopt the work-domain convention in every environment;
+  the names never leave the VPC (split-horizon with the public domain).
+- **Public** records are **SRE-managed by default**: Terraform outputs exactly what to create
+  per hostname (the A record and the Certificate Manager DNS-authorization CNAME), and an SRE
+  adds them at the registrar. An **opt-in Cloud DNS public zone** (`manage_public_dns`,
+  default off) automates both record sets once the domain (or a subdomain) is delegated to
+  Cloud DNS at the registrar — a one-time manual step; until then nothing changes.
+- No external-dns controller runs in the cluster — a standing privileged controller is not
+  warranted for two gateways' records (ADR-0006).
 
 ### Forward note — service mesh
 East-west, pod-to-pod **mutual TLS** is built in the **security phase** (SEC-10, requirements §8),
@@ -299,7 +363,29 @@ not in this ingress work. The ingress and certificate design above is forward-co
 
 ---
 
-## 9. Build order
+## 9. Backup and restore
+
+Stateful workloads are recoverable from deletion, corruption, and operator error via
+**Backup for GKE** (ADR-0004) — managed, application-aware, namespace-scoped backups that
+capture Kubernetes state *and* volume data together.
+
+- **Agent + plan** — the Backup for GKE agent is enabled on the cluster; a Terraform-owned
+  **backup plan** per cluster schedules backups (cron + retention as runtime inputs) covering
+  the workload namespaces, **including volume data and Secrets**.
+- **Encrypted with our key** — backups are CMEK-encrypted; the Backup for GKE service agent
+  receives the same kind of key grant as the GKE and Compute agents (a third service-agent
+  grant in the foundation).
+- **Restore is a defined path, not an improvisation** — a Terraform-owned **restore plan**
+  pins the restore policy (namespace-scoped, conflict handling); an on-demand restore is an
+  operator/automation action against it. The validation suite proves the round-trip: write →
+  back up → delete the namespace → restore → the workload serves its data again.
+- **Backups can outlive the cluster deliberately** (that is the disaster-recovery property),
+  so a clean dev teardown **deletes backups explicitly**: short retention in dev, validation
+  cleans up the backups it creates, and the destroy path removes any remaining ones before
+  deleting the plan — leaving no orphaned billable storage (the teardown-hygiene lesson of
+  issue #31).
+
+## 10. Build order
 
 1. Project → enable services → force-create the service agents.
 2. KMS key ring + key → the two key grants.
@@ -311,9 +397,11 @@ not in this ingress work. The ingress and certificate design above is forward-co
 8. Connect Gateway access (IAM + in-cluster roles).
 9. Certificate Authority Service: CA pool + root + per-environment subordinate; grant cert-manager's identity the certificate-requester role.
 10. In-cluster platform add-ons: cert-manager + `google-cas-issuer` + `trust-manager`.
-11. Gateways: internal (`gke-l7-rilb`, CAS cert) and external (global external, Certificate Manager cert + Cloud Armor + SSL policy + static IP); HTTPRoutes per namespace.
+11. Gateways: internal (`gke-l7-rilb`, multi-SAN CAS cert) and external (global external, per-host Certificate Manager certs + Cloud Armor + SSL policy + static IP); HTTPRoutes per namespace.
+12. DNS: the private zone + per-host records for the internal gateway (the public zone only when `manage_public_dns` is on).
+13. Backup for GKE: agent, the CMEK key grant for its service agent, and the backup + restore plans.
 
-## 10. Decisions, in brief
+## 11. Decisions, in brief
 
 - **One project per environment** — clean isolation, cost, and blast-radius boundary.
 - **No public control-plane endpoint; DNS-based private endpoint + Connect Gateway** — nothing reaches the API over the internet.
@@ -326,25 +414,34 @@ not in this ingress work. The ingress and certificate design above is forward-co
 - **Two gateways per cluster (internal + external)** — one per exposure class, shared across workload namespaces via HTTPRoute attachment and cross-namespace grants; Terraform-owned policies keep their security baseline uniform.
 - **Public certs for external, private CAS for internal** — internal hostnames stay out of public Certificate Transparency; trust is distributed by MDM (browsers) and trust-manager (services).
 - **Mesh captured, not built** — CAS is the future mesh CA and the GKE gateway stays; east-west mTLS is built in the security phase.
+- **Per-pool autoscaler with explicit pools; no node auto-provisioning** — scale within the hardened pool template (per-zone min/max, BALANCED), never invent node shapes.
+- **Backup for GKE over disk snapshots or Velero** — application-aware, managed, CMEK-encrypted; Kubernetes state and volumes restore together.
+- **Regional persistent disk as a second named class, not the default** — zone-survivable storage for the workloads that need it, without taxing the ones that don't.
+- **Multi-host gateways, no wildcard certs** — per-host public certs picked by SNI; one explicit multi-SAN CAS leaf internally.
+- **Cloud DNS private zone for internal names; public DNS manual with an opt-in zone** — internal resolution is platform-owned; no in-cluster DNS controller.
 
-## 11. Open items
+## 12. Open items
 
 **Resolved at the Milestone 1 build:** the **control-plane DNS endpoint** is confirmed working on
 GKE **1.35.3-gke.2190000** (the cluster was reached over Connect Gateway); **Binary
 Authorization** runs the **generally-available project policy** in audit (the Preview check-based
-policy is not used). Still open:
+policy is not used). **Resolved at the Milestone 2 build:** the **internal-gateway certificate
+plumbing** — a CAS-issued leaf in a Secret attaches to the `gke-l7-rilb` gateway via
+`tls.certificateRefs`, with the proxy-only subnet in place (verified live, HTTPS 200 against the
+CAS root). Still open:
 
-- **Internal-gateway certificate plumbing** — confirm at build that a CAS-issued leaf in a Secret
-  attaches to the `gke-l7-rilb` gateway via `tls.certificateRefs`, and that the proxy-only subnet
-  is in place for the internal gateway.
 - **Full WAF enablement** — the external gateway ships a baseline Cloud Armor policy; enabling and
-  tuning the OWASP rule set in enforce mode + rate-limiting is tracked as its own issue.
+  tuning the OWASP rule set in enforce mode + rate-limiting is tracked as its own issue (#26).
 - **Staging/production upgrade mechanism** — deferred until the stage/prod clusters are built
   (release channel + maintenance exclusions vs. a pinned version).
 - **Service-to-service mutual TLS / service mesh** — a security-phase decision (SEC-10); the
   forward-compatible design is captured in §8.
-- **Autoscaling** — deferred (day-2).
+- **Confirm at the high-availability build:** the `autoscaling_profile` applies with node
+  auto-provisioning disabled; regional `pd-balanced` minimum size and CMEK behave as expected;
+  deleting a backup plan that has held backups destroys cleanly (else the destroy path purges
+  backups first); the preemption validation accounts for the autoscaler adding a node before
+  preemption fires.
 
-## 12. Related
+## 13. Related
 
 [requirements.md](../requirements.md) · [technology-choices.md](../technology-choices.md) · [security-requirements.md](../security-requirements.md).
