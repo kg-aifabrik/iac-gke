@@ -98,6 +98,10 @@ acceptance criteria were proven.
   most.
 - Config, infrastructure manifests, and UI get the same documentation care as code —
   no exceptions.
+- Two **living documents** are kept current as part of every implementation change, not as
+  an afterthought: [`docs/designs/google-cloud-design.md`](docs/designs/google-cloud-design.md)
+  (the design) and [`docs/implementation/cluster-build.md`](docs/implementation/cluster-build.md)
+  (how the build works). A change that alters behavior and doesn't touch them is incomplete.
 
 ## Error handling & resilience
 
