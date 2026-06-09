@@ -60,5 +60,49 @@ jobs:
           terraform_wrapper: false
       - name: Init
         run: terraform -chdir="$TF_ROOT" init -input=false -backend-config="bucket=${TF_VAR_state_bucket}"
+      # Before destroying, delete the in-cluster Gateways so the GKE Gateway
+      # controller releases the Google load-balancer resources it created
+      # (forwarding rules, target proxies, backend services, NEGs). Those are not
+      # in Terraform state; if the cluster is deleted first the controller dies
+      # without garbage-collecting them, and the orphans then block Terraform from
+      # deleting the SSL policies, the internal address, and the proxy-only subnet
+      # (issue #31). Idempotent: skipped when the cluster's fleet membership is
+      # already gone — e.g. a re-run after a partial destroy.
+      - name: Delete in-cluster Gateways first (release controller-managed LBs)
+        if: github.event.inputs.root == 'fop'
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+        run: |
+          cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name 2>/dev/null || true)"
+          if [ -z "$cluster" ]; then
+            echo "No cluster_name output (nothing built); skipping gateway cleanup."
+            exit 0
+          fi
+          # kubectl reaches the (private, no-public-endpoint) cluster over Connect
+          # Gateway, which needs gke-gcloud-auth-plugin — not on the runner by default.
+          if ! command -v gke-gcloud-auth-plugin >/dev/null 2>&1; then
+            curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+              | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+            echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+              | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list >/dev/null
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq google-cloud-cli-gke-gcloud-auth-plugin
+          fi
+          # If the membership is already gone (idempotent re-run), there is nothing
+          # in-cluster to clean — go straight to destroy.
+          if ! gcloud container fleet memberships get-credentials "$cluster" --project "${TF_VAR_project_id}" 2>/dev/null; then
+            echo "Fleet membership '$cluster' not reachable (already destroyed); skipping gateway cleanup."
+            exit 0
+          fi
+          # The Gateway's finalizer holds the object until the controller has removed
+          # its Google load balancers, so a completed delete means the edge resources
+          # are now unreferenced and Terraform can delete them.
+          if kubectl get gateways.gateway.networking.k8s.io -A >/dev/null 2>&1; then
+            kubectl delete gateways.gateway.networking.k8s.io --all --all-namespaces --timeout=600s
+            echo "Gateways deleted; controller has released its load balancers."
+          else
+            echo "No Gateway resources present; nothing to clean."
+          fi
+
       - name: Destroy
         run: terraform -chdir="$TF_ROOT" destroy -auto-approve -no-color -input=false -lock-timeout=120s

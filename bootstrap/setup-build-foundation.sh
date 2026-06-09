@@ -36,10 +36,13 @@ BUILD_ROLES=(
   roles/binaryauthorization.policyEditor
   roles/gkehub.admin
   roles/privateca.admin           # create CAS pools/CAs + set pool IAM (M2 ingress)
-  roles/certificatemanager.editor # create managed certs / maps / DNS auth (M2 ingress)
+  roles/certificatemanager.owner  # create AND delete managed certs/maps/DNS auth — editor has no *.delete, blocking clean teardown (#31)
 )
-# Superseded by serviceUsageAdmin; removed so the identity's role set stays exact.
-SUPERSEDED_ROLE="roles/serviceusage.serviceUsageViewer"
+# Roles to remove if present, so a re-run leaves the identity's role set exact.
+SUPERSEDED_ROLES=(
+  roles/serviceusage.serviceUsageViewer # superseded by serviceUsageAdmin
+  roles/certificatemanager.editor       # replaced by certificatemanager.owner (#31)
+)
 
 info() { printf '\033[0;34m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[0;32m ok\033[0m %s\n' "$*"; }
@@ -108,7 +111,7 @@ Plan${plan_label}:
   Project        : ${PROJECT_ID} (${PROJECT_NUMBER})
   Service account: ${SA_EMAIL}
   State bucket   : gs://${STATE_BUCKET} (versioned, uniform access, public access blocked)
-  Build roles    : ${#BUILD_ROLES[@]} predefined roles (project-scoped); removes ${SUPERSEDED_ROLE}
+  Build roles    : ${#BUILD_ROLES[@]} predefined roles (project-scoped); removes ${#SUPERSEDED_ROLES[@]} superseded
 
 This grants the automation identity the privileges to build clusters in THIS project.
 EOF
@@ -139,8 +142,10 @@ for role in "${BUILD_ROLES[@]}"; do
   run_quiet gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${SA_EMAIL}" --role="${role}" --condition=None
 done
-info "Removing the superseded read-only role ..."
-run gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SA_EMAIL}" --role="${SUPERSEDED_ROLE}" --condition=None >/dev/null 2>&1 || true
+info "Removing ${#SUPERSEDED_ROLES[@]} superseded roles ..."
+for role in "${SUPERSEDED_ROLES[@]}"; do
+  run gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${SA_EMAIL}" --role="${role}" --condition=None >/dev/null 2>&1 || true
+done
 
 ok "Build foundation ready. Terraform backend: bucket=${STATE_BUCKET}, prefix=env/<environment>."
