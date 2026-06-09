@@ -47,9 +47,9 @@ variable "internal_zone_domain" {
 }
 
 variable "manage_public_dns" {
-  description = "Opt-in public Cloud DNS zone for the external records (needs registrar delegation first; ADR-0006). Off: SRE creates the records manually from the dns_records output."
+  description = "Public Cloud DNS zone managing the external records (ADR-0006). On in dev to prove the automated path: requires the one-time NS delegation of dev.arthos.app at the registrar (see the bring-up runbook). Off = SRE creates the records manually from the dns_records output."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "public_zone_domain" {

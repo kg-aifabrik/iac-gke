@@ -65,12 +65,22 @@ gh workflow run terraform-apply.yml -f root=fop
 # + root trust bundle, and the two gateways (external + internal) with their routes.
 ```
 
-> **Ingress DNS (one-time per public hostname).** The external gateway's public managed
-> certificate validates via a **DNS-authorization CNAME** added at your DNS provider, and
-> clients reach it by an **A record** → the external gateway IP
-> (`terraform -chdir=terraform/envs/dev/fop output -raw external_gateway_ip`). The cert stays
-> `PROVISIONING` until that CNAME resolves, then goes `ACTIVE` (minutes). The internal hostname
-> needs no public DNS — it resolves to the private VIP inside the VPC.
+> **Ingress DNS.** Internal hostnames need no public DNS — the Cloud DNS **private zone**
+> resolves them to the private VIP inside the VPC automatically. Public hostnames depend on
+> the `manage_public_dns` mode (ADR-0006):
+>
+> - **Managed (dev's default)** — Terraform creates the public zone and every per-host record
+>   (the A records *and* the cert-validation CNAMEs). One-time 🧑 step: **delegate the
+>   subdomain at the registrar** — add NS records for it (host `dev` in `arthos.app`) pointing
+>   at the four names from
+>   `terraform -chdir=terraform/envs/dev/fop output public_zone_name_servers`. Certificates
+>   then validate unattended (`PROVISIONING` → `ACTIVE` in minutes). **After a destroy +
+>   re-create**, confirm the NS records still match that output — a re-created zone may be
+>   assigned a different nameserver set. Verify with `dig NS dev.arthos.app` (Google
+>   nameservers) and `dig <hostname>` (the gateway IP).
+> - **Manual** — an SRE creates each hostname's **DNS-authorization CNAME** and **A record**
+>   at the registrar, exactly as emitted by `terraform output dns_records`. Certs stay
+>   `PROVISIONING` until the CNAME resolves.
 
 ## 5. Verify the controls 🧑/🤖 (`gcloud`/`kubectl` + setup-doctor)
 
