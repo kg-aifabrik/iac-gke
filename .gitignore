@@ -14,11 +14,15 @@ venv/
 gha-creds-*.json
 application_default_credentials.json
 
-# Terraform — provider binaries and state are not committed; the lock file IS.
+# Terraform — provider binaries and state are not committed; the lock file IS,
+# but only at the root modules under envs/ where `terraform init` runs. Locks
+# inside reusable modules are spurious (init never consults them) — ignore them
+# so a stray `terraform init`/`validate` inside a module dir can't recommit one.
 .terraform/
 *.tfstate
 *.tfstate.*
 .terraform.tfstate.lock.info
+terraform/modules/**/.terraform.lock.hcl
 crash.log
 # Real variable files carry account-specific values (project ids); only the
 # committed *.example templates are tracked.
