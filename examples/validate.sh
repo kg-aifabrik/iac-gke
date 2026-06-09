@@ -116,6 +116,15 @@ setup_wi_prereqs() {
 # --- examples --------------------------------------------------------------
 
 ensure_namespace() {
+  # A prior --cleanup deletes the namespace asynchronously; if it's still
+  # Terminating, wait for it to clear before recreating (otherwise applies fail
+  # with "namespace is being terminated").
+  local phase
+  phase="$(kubectl get namespace "${NS}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ "${phase}" == "Terminating" ]]; then
+    log "namespace ${NS} is terminating; waiting for it to clear"
+    kubectl wait --for=delete "namespace/${NS}" --timeout=180s 2>/dev/null || true
+  fi
   kubectl get namespace "${NS}" >/dev/null 2>&1 || kubectl create namespace "${NS}"
 }
 
