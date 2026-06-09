@@ -13,6 +13,8 @@ starting point.
 | 02 | `encrypted-pvc` | The CMEK-encrypted StorageClass works | A volume mounts and **data persists** across pod recreation |
 | 03 | `artifact-registry` | Images pull from Artifact Registry | A pull through the proxy is **admitted** (Binary Authorization audit) and runs |
 | 04 | `workload-identity` | Pods get their own Google identity | A pod **reads a Secret Manager secret** with no keys (Workload Identity) |
+| 05 | `external-ingress` | The public gateway serves HTTPS | A client gets **HTTPS 200** + "Hello World" at `app.dev.arthos.app` with a publicly-trusted cert |
+| 06 | `internal-ingress` | The internal gateway serves HTTPS | An in-VPC client gets **HTTPS 200** + "Hello World" with the **CAS** cert (verified against the CAS root) |
 
 ## Run
 
@@ -37,6 +39,15 @@ Images are pulled through the Artifact Registry Docker Hub proxy
 pull. The `encrypted-rwo` StorageClass that example 02 uses is a platform
 default the pipeline applies after a build (rendered by the cluster stack from
 the cluster's CMEK key).
+
+**Ingress examples (05/06)** need the gateway IPs: set `EXTERNAL_IP` /
+`INTERNAL_IP` (or let the script read `terraform output external_gateway_ip` /
+`internal_gateway_ip`); they SKIP if unset. The external test uses
+`curl --resolve` to the gateway IP, so the public **A record** need not have
+propagated — but the **managed cert must be ACTIVE** (its DNS-authorization
+CNAME added). The internal test runs from an in-cluster pod (the VIP is private)
+and trusts the CAS root via the `cas-root` ConfigMap that trust-manager
+distributes.
 
 ## Recording results
 
