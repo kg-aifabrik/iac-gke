@@ -30,3 +30,8 @@ output "services_range_name" {
   description = "Name of the secondary range for Services."
   value       = "services"
 }
+
+output "proxy_only_subnet_id" {
+  description = "Full id of the regional proxy-only subnet, or null when not created."
+  value       = one(google_compute_subnetwork.proxy_only[*].id)
+}

@@ -45,3 +45,15 @@ variable "enable_cloud_nat" {
   type        = bool
   default     = false
 }
+
+variable "enable_proxy_only_subnet" {
+  description = "Create the regional proxy-only subnet that regional Application Load Balancers (the internal gateway, §8) require. One per region per network. Off unless an internal gateway is used."
+  type        = bool
+  default     = false
+}
+
+variable "proxy_only_cidr" {
+  description = "CIDR for the regional proxy-only subnet (Envoy proxies, not workloads). Must not overlap the node/Pod/Service ranges."
+  type        = string
+  default     = "10.2.0.0/23"
+}

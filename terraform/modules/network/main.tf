@@ -53,3 +53,18 @@ resource "google_compute_router_nat" "this" {
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 }
+
+# Regional proxy-only subnet — the managed Envoy proxy pool that fronts regional
+# Application Load Balancers (the internal gateway, §8). One per region per
+# network; it carries no workloads (purpose REGIONAL_MANAGED_PROXY). Created only
+# when an internal gateway is used.
+resource "google_compute_subnetwork" "proxy_only" {
+  count         = var.enable_proxy_only_subnet ? 1 : 0
+  project       = var.project_id
+  name          = "${var.network_name}-proxy-only"
+  region        = var.region
+  network       = google_compute_network.this.id
+  ip_cidr_range = var.proxy_only_cidr
+  purpose       = "REGIONAL_MANAGED_PROXY"
+  role          = "ACTIVE"
+}
