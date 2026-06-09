@@ -3,7 +3,7 @@
 An operator-facing record of how a cluster is assembled, and why — read this instead
 of reverse-engineering the Terraform. It grows one section per layer as each is built.
 
-*Design (the why): [cluster-ctrl `docs/designs/google-cloud-design.md`](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md). Plans: [`milestone-1-cluster-factory.md`](../plans/milestone-1-cluster-factory.md) (cluster), [`milestone-2-ingress.md`](../plans/milestone-2-ingress.md) (ingress & TLS).*
+*Design (the why): [`docs/designs/google-cloud-design.md`](../designs/google-cloud-design.md). Plans: [`milestone-1-cluster-factory.md`](../plans/milestone-1-cluster-factory.md) (cluster), [`milestone-2-ingress.md`](../plans/milestone-2-ingress.md) (ingress & TLS).*
 
 ---
 

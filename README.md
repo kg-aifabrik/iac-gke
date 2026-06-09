@@ -2,10 +2,11 @@
 
 Infrastructure, policy, and automation for **cluster-ctrl** — how the AiFabrik Site
 Reliability Engineering (SRE) team builds and runs hardened **Google Kubernetes Engine
-(GKE)** clusters on Google Cloud. Requirements, technology choices, and the technical design
-live in the companion repo [`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl)
-(`docs/`); this repo holds the Terraform, the in-cluster manifests, the keyless pipeline, and
-the verifier.
+(GKE)** clusters on Google Cloud. Requirements, technology choices, the technical design, and
+the Architecture Decision Records live in [`docs/`](docs/) alongside the Terraform, the
+in-cluster manifests, the keyless pipeline, and the verifier — design and implementation evolve
+together. (The [`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl) repo is reserved
+for the future Operations Console.)
 
 This is the repository whose GitHub Actions automation is trusted to reach Google Cloud
 **keylessly** — Workload Identity Federation (WIF), no stored keys. It is **private** by design.
@@ -60,9 +61,12 @@ bootstrap/
   setup-build-foundation.sh   Terraform state bucket + build-role elevation (human-run)
   verifier/                   setup-doctor — preflight checks (keyless + cluster + ingress)
 docs/
+  requirements.md · security-requirements.md · technology-choices.md   the what + the how
+  designs/         google-cloud-design.md — the technical design (a living document)
+  adr/             Architecture Decision Records (MADR format)
   plans/           per-milestone implementation plans
-  runbooks/        one-time, human-run procedures (keyless setup; M1 bring-up)
-  implementation/  cluster-build.md — "how it was built", operator-facing
+  runbooks/        one-time, human-run procedures (keyless setup; cluster bring-up/teardown)
+  implementation/  cluster-build.md — how the build works, operator-facing (living document)
 .github/workflows/
   verify-access.yml                    keyless auth + setup-doctor (the M0 demo, kept green)
   terraform-{plan,apply,destroy}.yml   gated, keyless plan / apply / destroy
@@ -90,7 +94,7 @@ state under a prefix (`env/dev/foundation`, `env/dev/fop`).
 
 ## Where the *why* lives
 
-- **Design + decisions** — cluster-ctrl `docs/designs/google-cloud-design.md`, `docs/adr/`, and
-  `docs/{requirements,technology-choices,security-requirements}.md`.
+- **Design + decisions** — [`docs/designs/google-cloud-design.md`](docs/designs/google-cloud-design.md),
+  [`docs/adr/`](docs/adr/), and `docs/{requirements,technology-choices,security-requirements}.md`.
 - **Plans** — `docs/plans/`. **Build narrative** — `docs/implementation/cluster-build.md`.
 - **Bring-up + retrospectives** — `docs/runbooks/` and the per-milestone retrospective issues.

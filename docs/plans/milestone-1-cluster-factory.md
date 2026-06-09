@@ -1,7 +1,7 @@
 # Milestone 1 — Cluster factory (implementation plan)
 
 *Status: draft for review · Date: 2026-06-06*
-*Design (the why): [cluster-ctrl `docs/designs/google-cloud-design.md`](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md). Requirements and technology choices live in cluster-ctrl too. Issues for this milestone point back to this plan.*
+*Design (the why): [`docs/designs/google-cloud-design.md`](../designs/google-cloud-design.md). Requirements and technology choices live under [`docs/`](../) as well. Issues for this milestone point back to this plan.*
 
 ---
 
@@ -155,4 +155,4 @@ Filed as standalone open issues (not under Milestone 1):
 
 ## 9. Related
 
-[google-cloud-design.md](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md) · cluster-ctrl `requirements.md` · `technology-choices.md` · `security-requirements.md`.
+[google-cloud-design.md](../designs/google-cloud-design.md) · [`requirements.md`](../requirements.md) · [`technology-choices.md`](../technology-choices.md) · [`security-requirements.md`](../security-requirements.md).

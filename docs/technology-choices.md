@@ -65,7 +65,7 @@ iterated. Choices marked **Open** still have a sub-decision to confirm.
   per-environment SA is the identity FND-4 wants. Pinning on `repository_id` is immutable —
   it survives repo rename/transfer and resists name-reclaim, stronger than the mutable repo
   name; the `ref` condition limits authentication to the `main` branch.
-- **Implemented:** Milestone 0 in the `iac-gke` repo — `docs/runbooks/01-keyless-access-setup.md`
+- **Implemented:** Milestone 0 — [`docs/runbooks/01-keyless-access-setup.md`](runbooks/01-keyless-access-setup.md)
   (one-time setup) and `bootstrap/verifier` (the `setup-doctor` that verifies it, FND-2).
 
 ## TC-4: Private cluster access

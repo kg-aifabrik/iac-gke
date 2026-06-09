@@ -1,7 +1,7 @@
 # Milestone 2 — Ingress and TLS (implementation plan)
 
 *Status: draft for review · Date: 2026-06-08*
-*Design (the why): [cluster-ctrl `docs/designs/google-cloud-design.md` §8](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md). Decisions: ADR-0001 (two gateways per cluster), ADR-0002 (internal TLS via CAS), ADR-0003 (mesh deferred). Issues for this milestone link back to this plan.*
+*Design (the why): [`docs/designs/google-cloud-design.md` §8](../designs/google-cloud-design.md). Decisions: ADR-0001 (two gateways per cluster), ADR-0002 (internal TLS via CAS), ADR-0003 (mesh deferred). Issues for this milestone link back to this plan.*
 
 ---
 
@@ -129,4 +129,4 @@ coding standards, and links to this plan and the ADRs.
 
 ## 8. Related
 
-[google-cloud-design.md §8](https://github.com/kg-aifabrik/cluster-ctrl/blob/main/docs/designs/google-cloud-design.md) · ADR-0001/0002/0003 · cluster-ctrl `technology-choices.md` (TC-6/7/8) · `security-requirements.md` (SEC-10).
+[google-cloud-design.md §8](../designs/google-cloud-design.md) · [ADR-0001/0002/0003](../adr/) · [`technology-choices.md`](../technology-choices.md) (TC-6/7/8) · [`security-requirements.md`](../security-requirements.md) (SEC-10).
