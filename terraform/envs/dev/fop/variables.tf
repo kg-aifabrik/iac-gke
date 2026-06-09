@@ -27,3 +27,15 @@ variable "automation_member" {
   description = "CI automation identity that applies in-cluster resources via the gateway, e.g. \"serviceAccount:auto@project.iam.gserviceaccount.com\"."
   type        = string
 }
+
+variable "external_hostname" {
+  description = "Public FQDN served by the external gateway (its managed cert is validated for this name)."
+  type        = string
+  default     = "app.dev.arthos.app"
+}
+
+variable "internal_hostname" {
+  description = "Private FQDN served by the internal gateway (on the CAS-issued cert)."
+  type        = string
+  default     = "hello.internal.dev.arthos.app"
+}

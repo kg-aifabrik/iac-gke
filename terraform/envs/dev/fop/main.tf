@@ -43,4 +43,8 @@ module "stack" {
 
   operator_members  = var.operator_members
   automation_member = var.automation_member
+
+  # Ingress hostnames under the dev domain (public external + private internal).
+  external_hostname = var.external_hostname
+  internal_hostname = var.internal_hostname
 }

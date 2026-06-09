@@ -32,6 +32,31 @@ output "gateway_members" {
 }
 
 output "incluster_manifests" {
-  description = "Multi-doc YAML the pipeline applies with kubectl after the cluster is reachable: operator RBAC + the encrypted StorageClass."
+  description = "Multi-doc YAML the pipeline applies with kubectl after the cluster is reachable: namespaces, operator RBAC, encrypted StorageClass, CAS trust root + issuer + bundle, and the two gateways."
   value       = local.incluster_manifests
+}
+
+output "external_gateway_ip" {
+  description = "Public IP reserved for the external gateway."
+  value       = module.gateway_external.ip_address
+}
+
+output "internal_gateway_ip" {
+  description = "Private VIP reserved for the internal gateway."
+  value       = module.gateway_internal.ip_address
+}
+
+output "dns_records" {
+  description = "DNS records to create at the registrar for the external gateway (the cert DNS-authorization CNAME + the hostname A record)."
+  value       = module.gateway_external.dns_records
+}
+
+output "cert_manager_gsa_email" {
+  description = "Google service account to annotate the google-cas-issuer KSA with at Helm install."
+  value       = module.private_ca.cert_manager_gsa_email
+}
+
+output "cas_subordinate_pool" {
+  description = "CAS subordinate pool the GoogleCASClusterIssuer issues from."
+  value       = module.private_ca.subordinate_ca_pool_name
 }

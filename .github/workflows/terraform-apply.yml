@@ -97,7 +97,7 @@ jobs:
       # has no public endpoint; see the access module). Apply the platform
       # manifests the stack rendered (operator RBAC + encrypted StorageClass)
       # over Connect Gateway, once the cluster exists.
-      - name: Apply in-cluster platform manifests over Connect Gateway
+      - name: Install TLS add-ons and apply in-cluster manifests over Connect Gateway
         if: github.event.inputs.root == 'fop'
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -114,9 +114,25 @@ jobs:
             sudo apt-get install -y -qq google-cloud-cli-gke-gcloud-auth-plugin
           fi
           cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name)"
+          gsa="$(terraform -chdir="$TF_ROOT" output -raw cert_manager_gsa_email)"
           terraform -chdir="$TF_ROOT" output -raw incluster_manifests > incluster.yaml
           gcloud container fleet memberships get-credentials "$cluster" --project "${TF_VAR_project_id}"
-          # Gateway IAM granted in this same apply may need a moment to propagate.
+
+          # Install the pinned TLS controllers; their CRDs must exist before the
+          # manifests below (GoogleCASClusterIssuer, Bundle) are applied. The
+          # google-cas-issuer KSA is annotated for Workload Identity (no keys).
+          helm repo add jetstack https://charts.jetstack.io --force-update
+          helm repo update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            -n cert-manager --create-namespace --version v1.16.2 --set crds.enabled=true --wait
+          helm upgrade --install trust-manager jetstack/trust-manager \
+            -n cert-manager --version v0.13.0 --wait
+          helm upgrade --install google-cas-issuer jetstack/cert-manager-google-cas-issuer \
+            -n cert-manager --version v0.9.1 \
+            --set "serviceAccount.annotations.iam\.gke\.io/gcp-service-account=${gsa}" --wait
+
+          # Apply the platform manifests. Gateway IAM granted in this same apply
+          # may need a moment to propagate.
           for attempt in 1 2 3 4 5; do
             if kubectl apply -f incluster.yaml; then exit 0; fi
             echo "Apply attempt ${attempt} failed; waiting for gateway IAM to propagate..."

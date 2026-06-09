@@ -26,8 +26,30 @@ output "proxy_repository_url" {
 }
 
 # The pipeline writes this to a file and applies it with kubectl over Connect
-# Gateway once the cluster is reachable (operator RBAC + encrypted StorageClass).
+# Gateway once the cluster is reachable (namespaces, RBAC, StorageClass, CAS
+# issuer/bundle, and the gateways).
 output "incluster_manifests" {
   description = "In-cluster platform manifests (YAML) to apply post-build."
   value       = module.stack.incluster_manifests
+}
+
+output "cert_manager_gsa_email" {
+  description = "Annotate the google-cas-issuer KSA with this at Helm install (Workload Identity)."
+  value       = module.stack.cert_manager_gsa_email
+}
+
+# The two records to create at the registrar (GoDaddy) for the external gateway.
+output "dns_records" {
+  description = "External-gateway DNS records: the cert DNS-authorization CNAME + the hostname A record."
+  value       = module.stack.dns_records
+}
+
+output "external_gateway_ip" {
+  description = "Public IP of the external gateway."
+  value       = module.stack.external_gateway_ip
+}
+
+output "internal_gateway_ip" {
+  description = "Private VIP of the internal gateway."
+  value       = module.stack.internal_gateway_ip
 }

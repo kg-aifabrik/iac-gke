@@ -46,9 +46,60 @@ locals {
     reclaimPolicy        = "Delete"
   })
 
-  # Everything the pipeline applies in-cluster after a build, as one multi-doc
-  # YAML stream: operator RBAC + the encrypted StorageClass.
-  incluster_manifests = "${module.access.rbac_manifest}\n---\n${local.storageclass_manifest}"
+  # Platform namespaces: the gateway namespace and the two workload namespaces,
+  # labelled so their HTTPRoutes may attach to the matching gateway. Full
+  # namespace stamping (default-deny, quotas) is the security milestone.
+  namespace_manifests = [
+    for ns in [
+      { name = var.gateway_namespace, labels = {} },
+      { name = var.external_namespace, labels = { ingress = "external" } },
+      { name = var.internal_namespace, labels = { ingress = "internal" } },
+      ] : yamlencode({
+        apiVersion = "v1"
+        kind       = "Namespace"
+        metadata   = { name = ns.name, labels = merge(ns.labels, { "app.kubernetes.io/managed-by" = "cluster-ctrl" }) }
+    })
+  ]
+
+  # The CAS root distributed to workloads: a source ConfigMap in the trust
+  # namespace + a trust-manager Bundle that fans it out to every namespace.
+  cas_root_configmap = yamlencode({
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata   = { name = "cas-root", namespace = "cert-manager" }
+    data       = { "ca.crt" = join("", module.private_ca.root_ca_pem) }
+  })
+  cas_cluster_issuer = yamlencode({
+    apiVersion = "cas-issuer.jetstack.io/v1beta1"
+    kind       = "GoogleCASClusterIssuer"
+    metadata   = { name = "cas-issuer" }
+    spec       = { project = var.project_id, location = var.region, caPoolId = module.private_ca.subordinate_ca_pool_name }
+  })
+  trust_bundle = yamlencode({
+    apiVersion = "trust.cert-manager.io/v1alpha1"
+    kind       = "Bundle"
+    metadata   = { name = "cas-root" }
+    spec = {
+      sources = [{ configMap = { name = "cas-root", key = "ca.crt" } }]
+      target  = { configMap = { key = "ca.crt" } }
+    }
+  })
+
+  # Everything the pipeline applies in-cluster after a build (after the Helm
+  # add-ons): namespaces, operator RBAC, the encrypted StorageClass, the CAS
+  # trust root + issuer + bundle, and the two gateways.
+  incluster_manifests = join("\n---\n", concat(
+    local.namespace_manifests,
+    [
+      module.access.rbac_manifest,
+      local.storageclass_manifest,
+      local.cas_root_configmap,
+      local.cas_cluster_issuer,
+      local.trust_bundle,
+      module.gateway_external.incluster_manifests,
+      module.gateway_internal.incluster_manifests,
+    ],
+  ))
 }
 
 data "google_compute_zones" "available" {
@@ -67,6 +118,10 @@ module "network" {
   pod_cidr         = var.pod_cidr
   service_cidr     = var.service_cidr
   enable_cloud_nat = var.enable_cloud_nat
+
+  # The internal gateway is a regional internal ALB, which needs a proxy-only subnet.
+  enable_proxy_only_subnet = true
+  proxy_only_cidr          = var.proxy_only_cidr
 }
 
 module "supply_chain" {
@@ -118,4 +173,42 @@ module "access" {
   operator_members  = var.operator_members
   automation_member = var.automation_member
   cluster_role      = var.cluster_role
+}
+
+# Private CA (CAS) for internal-endpoint TLS, plus the cert-manager identity.
+module "private_ca" {
+  source = "../private-ca"
+
+  project_id    = var.project_id
+  region        = var.region
+  environment   = var.environment
+  workload_pool = module.cluster.workload_pool
+  labels        = local.labels
+}
+
+# Two gateways per cluster (ADR-0001). External: internet-facing, public cert,
+# Cloud Armor. Internal: private VIP, CAS cert.
+module "gateway_external" {
+  source = "../gke-gateway"
+
+  exposure          = "external"
+  name              = "external"
+  project_id        = var.project_id
+  region            = var.region
+  gateway_namespace = var.gateway_namespace
+  hostname          = var.external_hostname
+  labels            = local.labels
+}
+
+module "gateway_internal" {
+  source = "../gke-gateway"
+
+  exposure          = "internal"
+  name              = "internal"
+  project_id        = var.project_id
+  region            = var.region
+  subnetwork        = module.network.subnetwork_self_link
+  gateway_namespace = var.gateway_namespace
+  hostname          = var.internal_hostname
+  labels            = local.labels
 }

@@ -192,3 +192,39 @@ variable "extra_labels" {
   type        = map(string)
   default     = {}
 }
+
+# --- Ingress (gateways + TLS) ----------------------------------------------
+
+variable "external_hostname" {
+  description = "Public FQDN served by the external gateway (validated for the Certificate Manager managed cert)."
+  type        = string
+}
+
+variable "internal_hostname" {
+  description = "Private FQDN served by the internal gateway (on the CAS-issued cert)."
+  type        = string
+}
+
+variable "proxy_only_cidr" {
+  description = "CIDR for the regional proxy-only subnet the internal gateway needs."
+  type        = string
+  default     = "10.2.0.0/23"
+}
+
+variable "gateway_namespace" {
+  description = "Namespace the platform gateways live in."
+  type        = string
+  default     = "gateway-system"
+}
+
+variable "external_namespace" {
+  description = "Workload namespace for public, internet-facing services (attaches to the external gateway)."
+  type        = string
+  default     = "public-services"
+}
+
+variable "internal_namespace" {
+  description = "Workload namespace for internal tools (attaches to the internal gateway)."
+  type        = string
+  default     = "internal-tools"
+}
