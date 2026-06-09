@@ -35,10 +35,12 @@ helm upgrade --install google-cas-issuer jetstack/cert-manager-google-cas-issuer
 
 - `cas-issuer.yaml` — the `GoogleCASClusterIssuer` (placeholders substituted from Terraform
   outputs: `PROJECT_ID`, `GCP_REGION`, `CAS_POOL`).
-- The **`cas-root` ConfigMap** — rendered by the env wiring from the `private-ca` module's
-  `root_ca_pem` output (key `ca.crt`); it is the source for the bundle below.
-- `trust-bundle.yaml` — the trust-manager `Bundle` that fans the root out to every namespace
-  as the `cas-root` ConfigMap, which workload clients mount to trust internal endpoints.
+- The **`cas-root-ca` ConfigMap** (in `cert-manager`) — rendered by the env wiring from the
+  `private-ca` module's `root_ca_pem` output (key `ca.crt`); it is the **source** for the
+  bundle below. Its name must differ from the Bundle's target name.
+- `trust-bundle.yaml` — the trust-manager `Bundle` named `cas-root` that fans the root out to
+  every namespace as a `cas-root` ConfigMap (the **target**), which workload clients mount to
+  trust internal endpoints.
 
 The matching Google-side identity (the CAS service account, its `certificateRequester` grant,
 and the Workload-Identity binding to the `cert-manager-google-cas-issuer` KSA) is created by

@@ -51,6 +51,7 @@ distributes.
 
 ## Recording results
 
-Paste the script's summary block into the Milestone 1 issue (#11) as the
-post-build validation evidence. The runtime acceptance criteria are checked off
+Paste the script's summary block into the milestone's verification issue as the
+post-build validation evidence (Milestone 1 → #11; later milestones use their own
+retrospective/verification issue). The runtime acceptance criteria are checked off
 only after this script passes against the real cluster.
