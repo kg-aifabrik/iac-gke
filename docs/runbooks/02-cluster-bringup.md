@@ -1,8 +1,9 @@
-# Runbook — Milestone 1 bring-up (build, verify, tear down the dev cluster)
+# Runbook — cluster bring-up, verify, and teardown
 
-Ordered, copy-paste steps to build the dev Fleet-Operations-Plane (FOP) cluster through
-the pipeline, verify its controls and workloads, and tear it down. Assumes Milestone 0
-(keyless access) is done: [`01-keyless-access-setup.md`](01-keyless-access-setup.md).
+Ordered, copy-paste steps to build a dev Fleet-Operations-Plane (FOP) cluster through the
+pipeline, verify its controls and workloads (including ingress + TLS), and tear it down
+cleanly — the living procedure we follow as the implementation grows. Assumes the keyless
+access setup is done: [`01-keyless-access-setup.md`](01-keyless-access-setup.md).
 
 Legend: 🧑 = needs you (a real account / `gcloud`); 🤖 = Claude can do it from `gh`/repo.
 
@@ -58,9 +59,18 @@ Open a PR touching `terraform/` to see the plan posted on the PR (review it), th
 
 ```bash
 gh workflow run terraform-apply.yml -f root=fop
-# Approve in 'dev'. Applies the saved plan, then applies the in-cluster platform manifests
-# (operator RBAC + encrypted StorageClass) over Connect Gateway.
+# Approve in 'dev'. Applies the saved plan, then over Connect Gateway: Helm-installs the
+# pinned TLS controllers (cert-manager, trust-manager, google-cas-issuer) and applies the
+# in-cluster platform manifests — operator RBAC, the encrypted StorageClass, the CAS issuer
+# + root trust bundle, and the two gateways (external + internal) with their routes.
 ```
+
+> **Ingress DNS (one-time per public hostname).** The external gateway's public managed
+> certificate validates via a **DNS-authorization CNAME** added at your DNS provider, and
+> clients reach it by an **A record** → the external gateway IP
+> (`terraform -chdir=terraform/envs/dev/fop output -raw external_gateway_ip`). The cert stays
+> `PROVISIONING` until that CNAME resolves, then goes `ACTIVE` (minutes). The internal hostname
+> needs no public DNS — it resolves to the private VIP inside the VPC.
 
 ## 5. Verify the controls 🧑/🤖 (`gcloud`/`kubectl` + setup-doctor)
 
@@ -80,23 +90,34 @@ Binary Authorization audit, least-privilege node SA.
 ## 6. Validate workloads (end-user) 🧑 (`kubectl`)
 
 ```bash
-examples/validate.sh          # deploys 4 cases over the gateway and asserts the outcomes
+examples/validate.sh          # deploys 6 cases and asserts the end-to-end outcomes
 ```
 
 Expect: hello-web → HTTP 200 + "Hello World"; encrypted-pvc → data persists; artifact-registry
-→ pull admitted + runs; workload-identity → secret read. Paste the summary block into issue #11.
+→ pull admitted + runs; workload-identity → secret read; external-ingress → HTTPS 200 with a
+publicly-trusted cert; internal-ingress → HTTPS 200 with the CAS cert (verified to the CAS
+root). The two ingress cases SKIP if the gateway IPs aren't set, and need the managed cert
+`ACTIVE` (see the DNS note above). Paste the summary block into the milestone's verification issue.
 
 ## 7. Record + close 🤖
 
-Paste the evidence (setup-doctor output + validate.sh summary) into the Milestone 1 issues;
-check off the runtime acceptance boxes confirmed; close #6–#9 and #11.
+Paste the evidence (setup-doctor output + validate.sh summary) into the milestone's issues;
+check off only the runtime acceptance boxes a test confirmed; close the milestone's chunk
+issues and its tracking issue.
 
 ## 8. Tear down 🤖 (dispatch, gated)
 
 ```bash
-gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop      # destroy the cluster
-# foundation is normally left in place; if torn down, the KMS key ring/key REMAIN
-# (Cloud KMS forbids deletion) and are reused on the next apply.
+examples/validate.sh --cleanup   # 🧑 first: remove the throwaway WI scaffolding (GSA + secret)
+gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop   # then destroy the cluster
+# Approve in 'dev'. The destroy workflow deletes the in-cluster Gateways first, so the GKE
+# Gateway controller releases its load balancers before Terraform removes the edge resources;
+# and the dev CAs purge with no grace window so their pools delete in the same run (#31).
+# foundation is normally left in place; if torn down, the KMS key ring/key REMAIN (Cloud KMS
+# forbids deletion) and are reused on the next apply.
 ```
 
-Cost while up: 3 × `e2-medium`, general pool only, short-lived.
+After teardown, remove the ingress DNS records you added — the external A record now points to a
+released IP and the DNS-authorization CNAME is moot.
+
+Cost while up: 3 × `e2-medium` (general pool), two load balancers, and the CAS pools — short-lived.
