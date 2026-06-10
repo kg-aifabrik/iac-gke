@@ -183,9 +183,11 @@ class Config:
     def cas_ca_resource(self, tier: str) -> str:
         """Full resource name of a CAS certificate authority (tier = root | subordinate).
 
-        The private-ca module names both the pool and the CA ``<env>-<tier>``.
+        The private-ca module names both the pool and the CA ``<env>-ca-<tier>``
+        (the "-ca-" infix exists because Google permanently retires deleted
+        CaPool ids — the original ``<env>-<tier>`` names are burned).
         """
-        ca = f"{self.environment}-{tier}"
+        ca = f"{self.environment}-ca-{tier}"
         return (
             f"{self.project_ref}/locations/{self.region}/caPools/{ca}/certificateAuthorities/{ca}"
         )

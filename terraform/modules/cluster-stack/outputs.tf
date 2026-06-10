@@ -57,13 +57,13 @@ output "dns_records" {
 }
 
 output "cert_manager_gsa_email" {
-  description = "Google service account to annotate the google-cas-issuer KSA with at Helm install."
-  value       = module.private_ca.cert_manager_gsa_email
+  description = "Google service account to annotate the google-cas-issuer KSA with at Helm install (passed through from the foundation)."
+  value       = var.cert_manager_gsa_email
 }
 
 output "cas_subordinate_pool" {
-  description = "CAS subordinate pool the GoogleCASClusterIssuer issues from."
-  value       = module.private_ca.subordinate_ca_pool_name
+  description = "CAS subordinate pool the GoogleCASClusterIssuer issues from (passed through from the foundation)."
+  value       = var.cas_subordinate_pool_name
 }
 
 output "external_hostnames" {

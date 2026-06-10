@@ -97,13 +97,13 @@ locals {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata   = { name = "cas-root-ca", namespace = "cert-manager" }
-    data       = { "ca.crt" = join("", module.private_ca.root_ca_pem) }
+    data       = { "ca.crt" = var.cas_root_ca_pem }
   })
   cas_cluster_issuer = yamlencode({
     apiVersion = "cas-issuer.jetstack.io/v1beta1"
     kind       = "GoogleCASClusterIssuer"
     metadata   = { name = "cas-issuer" }
-    spec       = { project = var.project_id, location = var.region, caPoolId = module.private_ca.subordinate_ca_pool_name }
+    spec       = { project = var.project_id, location = var.region, caPoolId = var.cas_subordinate_pool_name }
   })
   trust_bundle = yamlencode({
     apiVersion = "trust.cert-manager.io/v1alpha1"
@@ -244,18 +244,6 @@ module "backup" {
   # namespaces are deliberately excluded (see the gke-backup module).
   restore_namespaces = [var.external_namespace, var.internal_namespace, "examples"]
   labels             = local.labels
-}
-
-# Private CA (CAS) for internal-endpoint TLS, plus the cert-manager identity.
-module "private_ca" {
-  source = "../private-ca"
-
-  project_id          = var.project_id
-  region              = var.region
-  environment         = var.environment
-  workload_pool       = module.cluster.workload_pool
-  deletion_protection = var.deletion_protection
-  labels              = local.labels
 }
 
 # Two gateways per cluster (ADR-0001). External: internet-facing, public cert,

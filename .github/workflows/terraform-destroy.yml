@@ -6,7 +6,9 @@
 #
 # Note: destroying the foundation removes resources from state but the KMS key
 # ring/key remain in Google Cloud (Cloud KMS forbids deletion); a later apply
-# reuses them. Normal teardown targets `fop`, not `foundation`.
+# reuses them. The CAS hierarchy also lives in the foundation (deleted CaPool
+# ids are retired FOREVER by Google — never destroy it casually; recreation
+# needs new pool names). Normal teardown targets `fop`, not `foundation`.
 
 name: Terraform destroy
 

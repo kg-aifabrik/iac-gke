@@ -157,6 +157,21 @@ variable "enable_confidential_pool" {
   default     = false
 }
 
+variable "cas_subordinate_pool_name" {
+  description = "CAS subordinate pool (from the foundation — the CA hierarchy outlives clusters; ADR-0002 amended) the in-cluster issuer requests leaves from."
+  type        = string
+}
+
+variable "cas_root_ca_pem" {
+  description = "The CAS root certificate (PEM, from the foundation) trust-manager distributes to namespaces."
+  type        = string
+}
+
+variable "cert_manager_gsa_email" {
+  description = "Google service account (from the foundation) the google-cas-issuer KSA impersonates via Workload Identity."
+  type        = string
+}
+
 variable "enable_backup" {
   description = "Create the Backup for GKE backup + restore plans for this cluster (ADR-0004)."
   type        = bool

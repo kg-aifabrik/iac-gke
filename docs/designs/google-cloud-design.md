@@ -321,7 +321,10 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   logs**, so public certificates do not apply to them; the private CA's cost and trust
   distribution are provided for below.
   - **Hierarchy** — a long-lived **root** CA kept cold, with **per-environment subordinate** CAs
-    issuing the leaf certificates.
+    issuing the leaf certificates. The hierarchy is **foundation-owned** — it outlives cluster
+    rebuilds (distributed trust must not churn) and Google permanently retires deleted CaPool
+    ids, so the pools (`<env>-ca-root`, `<env>-ca-subordinate`) persist like the KMS key
+    (ADR-0002, amended).
   - **Issuance** — **cert-manager** with the **`google-cas-issuer`** requests a leaf from CAS,
     writes it to a Secret, and the gateway references it (`tls.certificateRefs`). Leaves
     auto-rotate.
@@ -395,7 +398,7 @@ capture Kubernetes state *and* volume data together.
 6. Cluster (regional, private, hardened, Workload Identity, our key, Dataplane V2) → fleet membership.
 7. Node pools (general; Confidential if requested).
 8. Connect Gateway access (IAM + in-cluster roles).
-9. Certificate Authority Service: CA pool + root + per-environment subordinate; grant cert-manager's identity the certificate-requester role.
+9. Certificate Authority Service (in the foundation, step 1-3 territory — it persists across cluster rebuilds): pools + root + per-environment subordinate; grant cert-manager's identity the certificate-requester role.
 10. In-cluster platform add-ons: cert-manager + `google-cas-issuer` + `trust-manager`.
 11. Gateways: internal (`gke-l7-rilb`, multi-SAN CAS cert) and external (global external, per-host Certificate Manager certs + Cloud Armor + SSL policy + static IP); HTTPRoutes per namespace.
 12. DNS: the private zone + per-host records for the internal gateway (the public zone only when `manage_public_dns` is on).

@@ -22,6 +22,10 @@ module "stack" {
   # From the per-project foundation.
   kms_key_id                 = data.terraform_remote_state.foundation.outputs.kms_crypto_key_id
   node_service_account_email = data.terraform_remote_state.foundation.outputs.node_service_account_email
+  # The CA hierarchy outlives clusters (foundation-owned; ADR-0002 amended).
+  cas_subordinate_pool_name = data.terraform_remote_state.foundation.outputs.cas_subordinate_pool_name
+  cas_root_ca_pem           = data.terraform_remote_state.foundation.outputs.cas_root_ca_pem
+  cert_manager_gsa_email    = data.terraform_remote_state.foundation.outputs.cert_manager_gsa_email
 
   # Sizing: smallest viable for dev — e2-medium across three zones (the stack
   # defaults to the region's first three), general pool only, autoscaling

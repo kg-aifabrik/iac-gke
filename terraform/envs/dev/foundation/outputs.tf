@@ -19,3 +19,20 @@ output "enabled_services" {
   description = "Services enabled in the project."
   value       = module.foundation.enabled_services
 }
+
+# --- Private CA (CAS) — consumed by the cluster roots ------------------------
+
+output "cas_subordinate_pool_name" {
+  description = "CAS subordinate pool the GoogleCASClusterIssuer issues from."
+  value       = module.private_ca.subordinate_ca_pool_name
+}
+
+output "cas_root_ca_pem" {
+  description = "The CAS root certificate (PEM) trust-manager distributes in-cluster."
+  value       = join("", module.private_ca.root_ca_pem)
+}
+
+output "cert_manager_gsa_email" {
+  description = "Google service account the google-cas-issuer KSA impersonates."
+  value       = module.private_ca.cert_manager_gsa_email
+}

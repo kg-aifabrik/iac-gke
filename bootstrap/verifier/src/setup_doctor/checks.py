@@ -498,7 +498,7 @@ def check_cas_cas_enabled(privateca: Any, config: Config) -> CheckResult:
         for tier in ("root", "subordinate"):
             ca = cas_api.get(name=config.cas_ca_resource(tier)).execute(num_retries=3)
             if ca.get("state") != "ENABLED":
-                not_enabled.append(f"{config.environment}-{tier}")
+                not_enabled.append(f"{config.environment}-ca-{tier}")
     except HttpError as error:
         status = _http_status(error)
         if status == 403:

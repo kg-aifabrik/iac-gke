@@ -108,14 +108,16 @@ Binary Authorization audit, least-privilege node SA.
 ## 6. Validate workloads (end-user) 🧑 (`kubectl`)
 
 ```bash
-examples/validate.sh          # deploys 6 cases and asserts the end-to-end outcomes
+examples/validate.sh          # deploys 13 cases and asserts the end-to-end outcomes
 ```
 
-Expect: hello-web → HTTP 200 + "Hello World"; encrypted-pvc → data persists; artifact-registry
-→ pull admitted + runs; workload-identity → secret read; external-ingress → HTTPS 200 with a
-publicly-trusted cert; internal-ingress → HTTPS 200 with the CAS cert (verified to the CAS
-root). The two ingress cases SKIP if the gateway IPs aren't set, and need the managed cert
-`ACTIVE` (see the DNS note above). Paste the summary block into the milestone's verification issue.
+The full case matrix (what each asserts) is in [`examples/README.md`](../../examples/README.md):
+serving on every hostname over both gateways (internal by NAME via the private zone), drain
+survival and a rolling deploy with zero failed requests, node autoscaling, HPA, regional-PD
+zone failover, preemption, and backup→restore (which runs last and bounces the workload
+namespaces). Ingress cases need the managed certs `ACTIVE` (see the DNS note above); the
+drain/failover cases cordon nodes (auto-uncordoned). Expect ~30–40 minutes. Paste the summary
+block into the milestone's verification issue.
 
 ## 7. Record + close 🤖
 
@@ -129,8 +131,9 @@ issues and its tracking issue.
 examples/validate.sh --cleanup   # 🧑 first: remove the throwaway WI scaffolding (GSA + secret)
 gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop   # then destroy the cluster
 # Approve in 'dev'. The destroy workflow deletes the in-cluster Gateways first, so the GKE
-# Gateway controller releases its load balancers before Terraform removes the edge resources;
-# and the dev CAs purge with no grace window so their pools delete in the same run (#31).
+# Gateway controller releases its load balancers before Terraform removes the edge resources
+# (#31). The CAS hierarchy is foundation-owned and is NOT touched by a fop destroy — deleted
+# CaPool ids are retired forever, so the CA persists across rebuilds (ADR-0002 amendment).
 # foundation is normally left in place; if torn down, the KMS key ring/key REMAIN (Cloud KMS
 # forbids deletion) and are reused on the next apply.
 ```
@@ -138,4 +141,4 @@ gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop   # then destro
 After teardown, remove the ingress DNS records you added — the external A record now points to a
 released IP and the DNS-authorization CNAME is moot.
 
-Cost while up: 3 × `e2-medium` (general pool), two load balancers, and the CAS pools — short-lived.
+Cost while up: 3–6 × `e2-medium` (autoscaling), two load balancers, backups — short-lived. The CAS pools persist in the foundation (standing, accepted).

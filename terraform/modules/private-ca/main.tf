@@ -3,6 +3,13 @@
 # cert-manager (google-cas-issuer) issues leaf certs from the subordinate pool.
 # Internal hostnames never enter public Certificate Transparency logs.
 #
+# Lifetime: instantiated from the per-project FOUNDATION root (like the KMS
+# key), not the per-cluster roots — the root CA must outlive cluster rebuilds
+# (MDM-distributed trust breaks if it churns), and Google permanently RETIRES
+# a deleted CaPool id (observed: dev-root/dev-subordinate burned at the M2
+# teardown, run 27249785152). Hence the "-ca-" infix in the pool names: the
+# original ids can never be used again.
+#
 # Terraform owns the Google resources (this module). The cert-manager add-on and
 # the trust-manager bundle that distributes the root are in-cluster manifests.
 
@@ -19,7 +26,7 @@ locals {
 
 resource "google_privateca_ca_pool" "root" {
   project  = var.project_id
-  name     = "${var.environment}-root"
+  name     = "${var.environment}-ca-root"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -29,7 +36,7 @@ resource "google_privateca_certificate_authority" "root" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.root.name
-  certificate_authority_id = "${var.environment}-root"
+  certificate_authority_id = "${var.environment}-ca-root"
   type                     = "SELF_SIGNED"
   lifetime                 = var.root_ca_lifetime
   labels                   = var.labels
@@ -73,7 +80,7 @@ resource "google_privateca_certificate_authority" "root" {
 
 resource "google_privateca_ca_pool" "subordinate" {
   project  = var.project_id
-  name     = "${var.environment}-subordinate"
+  name     = "${var.environment}-ca-subordinate"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -83,7 +90,7 @@ resource "google_privateca_certificate_authority" "subordinate" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.subordinate.name
-  certificate_authority_id = "${var.environment}-subordinate"
+  certificate_authority_id = "${var.environment}-ca-subordinate"
   type                     = "SUBORDINATE"
   lifetime                 = var.subordinate_ca_lifetime
   labels                   = var.labels

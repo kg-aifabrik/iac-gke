@@ -42,3 +42,21 @@ trust-manager.
   automated leaf rotation; forward-compatible with a mesh (ADR-0003).
 - **Bad:** CAS carries a recurring cost; trust distribution to browsers (MDM) is operator-owned
   work.
+
+## Amendment (2026-06-10, Milestone 3 bring-up)
+
+The CAS hierarchy moved from the per-cluster roots into the **per-project
+foundation** root, and the pools are named ``<env>-ca-root`` /
+``<env>-ca-subordinate``. Two forcing facts surfaced at the bring-up (run
+27249785152):
+
+- Google **permanently retires a deleted CaPool id** — ``dev-root`` and
+  ``dev-subordinate``, purged at the Milestone 2 teardown, can never be
+  recreated; hence the ``-ca-`` infix.
+- The root must **outlive cluster rebuilds** anyway: MDM-distributed browser
+  trust (and any recorded leaf chains) break if the root churns with every
+  dev teardown.
+
+The foundation is the existing home for resources whose lifetime exceeds a
+cluster's (the KMS key ring). A ``fop`` destroy no longer touches CAS; the
+standing pool cost is accepted (cost was already a non-driver here).
