@@ -85,3 +85,10 @@ output "restore_plan_name" {
   description = "Backup for GKE restore-plan name."
   value       = module.stack.restore_plan_name
 }
+
+# The one-time registrar delegation: NS records for the public subdomain point
+# at these (re-check after a zone re-create — the set can change).
+output "public_zone_name_servers" {
+  description = "Cloud DNS nameservers to delegate the public subdomain to at the registrar."
+  value       = module.stack.public_zone_name_servers
+}
