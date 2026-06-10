@@ -325,25 +325,27 @@ PROBE_FILE=""
 PROBE_PID=""
 start_probe() {
   PROBE_FILE="$(mktemp)"
+  rm -f "${PROBE_FILE}.stop"
+  # The loop exits via a stop-file rather than a signal: a clean exit keeps
+  # wait's semantics and avoids the shell's "Terminated" job notices.
   (
-    while :; do
+    while [[ ! -e "${PROBE_FILE}.stop" ]]; do
       curl -sS --max-time 5 --resolve "${EXTERNAL_HOSTS[0]}:443:${EXTERNAL_IP}" \
         -o /dev/null -w '%{http_code}\n' "https://${EXTERNAL_HOSTS[0]}/" 2>/dev/null || echo 000
       sleep 1
     done >>"${PROBE_FILE}"
   ) &
   PROBE_PID=$!
-  disown
 }
 
 # Stops the probe and reports "<total> <failures>".
 stop_probe() {
-  kill "${PROBE_PID}" 2>/dev/null || true
+  touch "${PROBE_FILE}.stop"
   wait "${PROBE_PID}" 2>/dev/null || true
   local total failures
   total="$(wc -l <"${PROBE_FILE}" | tr -d ' ')"
   failures="$(grep -cv '^200$' "${PROBE_FILE}" || true)"
-  rm -f "${PROBE_FILE}"
+  rm -f "${PROBE_FILE}" "${PROBE_FILE}.stop"
   echo "${total} ${failures}"
 }
 

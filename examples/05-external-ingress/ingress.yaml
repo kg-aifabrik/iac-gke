@@ -60,6 +60,13 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 100m, memory: 64Mi }
+          # Zero-downtime contract: on termination keep serving while the load
+          # balancer drains the endpoint (~seconds); without this, one request
+          # lands in the SIGTERM-to-endpoint-removal gap on every rollout.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]
           # Readiness gates the load balancer's backend health — required for
           # zero-downtime rollouts (the gateway only routes to ready pods).
           readinessProbe:
