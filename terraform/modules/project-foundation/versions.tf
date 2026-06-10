@@ -14,5 +14,11 @@ terraform {
       source  = "hashicorp/google-beta"
       version = ">= 6.0, < 8.0"
     }
+    # For the propagation wait between service-agent creation and its key
+    # grant (IAM rejects a just-generated agent as a member for ~seconds).
+    time = {
+      source  = "hashicorp/time"
+      version = ">= 0.9, < 1.0"
+    }
   }
 }

@@ -104,12 +104,24 @@ resource "google_project_service_identity" "gkebackup" {
   depends_on = [google_project_service.this]
 }
 
+# Creation alone is not enough: IAM rejects a just-generated agent as a policy
+# member for a few seconds ("service account does not exist" — observed at the
+# Milestone 3 bring-up, run 27243898819). Wait out the propagation before the
+# grant, so a greenfield project applies cleanly first time.
+resource "time_sleep" "gkebackup_agent_propagation" {
+  create_duration = "30s"
+
+  depends_on = [google_project_service_identity.gkebackup]
+}
+
 # Grant (c): the Backup for GKE service agent encrypts backups with the same
 # cluster key — wired on the backup plan's encryption_key (ADR-0004).
 resource "google_kms_crypto_key_iam_member" "gkebackup_backups" {
   crypto_key_id = google_kms_crypto_key.cluster.id
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
   member        = "serviceAccount:${google_project_service_identity.gkebackup.email}"
+
+  depends_on = [time_sleep.gkebackup_agent_propagation]
 }
 
 # --- Least-privilege node identity -----------------------------------------
