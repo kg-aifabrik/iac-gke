@@ -377,10 +377,10 @@ def test_cas_cas_enabled_passes(cluster_config):
 
 
 def test_cas_subordinate_disabled_fails(cluster_config):
-    pca = FakePrivateCa(states={"dev-ca-subordinate": "DISABLED"})
+    pca = FakePrivateCa(states={"dev-cas-subordinate": "DISABLED"})
     result = checks.check_cas_cas_enabled(pca, cluster_config)
     assert result.status is Status.FAIL
-    assert "dev-ca-subordinate" in result.detail
+    assert "dev-cas-subordinate" in result.detail
 
 
 def test_cas_not_found_fails(cluster_config):

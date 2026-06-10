@@ -46,8 +46,9 @@ trust-manager.
 ## Amendment (2026-06-10, Milestone 3 bring-up)
 
 The CAS hierarchy moved from the per-cluster roots into the **per-project
-foundation** root, and the pools are named ``<env>-ca-root`` /
-``<env>-ca-subordinate``. Two forcing facts surfaced at the bring-up (run
+foundation** root, and the pools are named ``<env>-cas-root`` /
+``<env>-cas-subordinate`` (the ``-ca-`` generation was burned switching dev to the
+DEVOPS tier — see the cost addendum below). Two forcing facts surfaced at the bring-up (run
 27249785152):
 
 - Google **permanently retires a deleted CaPool id** — ``dev-root`` and
@@ -60,3 +61,17 @@ foundation** root, and the pools are named ``<env>-ca-root`` /
 The foundation is the existing home for resources whose lifetime exceeds a
 cluster's (the KMS key ring). A ``fop`` destroy no longer touches CAS; the
 standing pool cost is accepted (cost was already a non-driver here).
+
+## Amendment 2 (2026-06-10, Milestone 3 cost review)
+
+**Tier is per environment: dev uses DEVOPS, stage/prod use ENTERPRISE.** Leaving the
+ENTERPRISE default standing in the foundation made CAS the milestone's single largest
+cost (~$12 over the bring-up — ~85% of the bill — versus ~$2.50 for the whole cluster),
+because ENTERPRISE bills a premium per-CA fee and the churny bring-up created several CA
+generations. DEVOPS is ~10x cheaper and sufficient for dev: it issues the same short-lived,
+auto-rotated internal leaves; it lacks certificate-revocation/CRL and issued-cert tracking,
+which dev does not need. Stage/prod keep ENTERPRISE (revocation matters there).
+
+Switching tier replaces the pool (``tier`` is immutable), which deletes — and therefore
+burns — the ``<env>-ca-*`` ids; the current generation is ``<env>-cas-*``. Since CAS now
+persists in the foundation it should not churn again, so one fresh generation suffices.

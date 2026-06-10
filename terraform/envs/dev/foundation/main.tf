@@ -34,5 +34,10 @@ module "private_ca" {
   # runs in.
   workload_pool       = "${var.project_id}.svc.id.goog"
   deletion_protection = false # dev; stage/prod set true
-  labels              = local.labels
+  # DEVOPS tier for dev: ~10x cheaper than ENTERPRISE and sufficient for
+  # short-lived auto-rotated internal leaves (no revocation/CRL needed in dev).
+  # The ENTERPRISE default left standing was Milestone 3's headline cost
+  # (~$12 over the bring-up); stage/prod keep ENTERPRISE.
+  cas_tier = "DEVOPS"
+  labels   = local.labels
 }

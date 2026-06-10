@@ -323,7 +323,7 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   - **Hierarchy** — a long-lived **root** CA kept cold, with **per-environment subordinate** CAs
     issuing the leaf certificates. The hierarchy is **foundation-owned** — it outlives cluster
     rebuilds (distributed trust must not churn) and Google permanently retires deleted CaPool
-    ids, so the pools (`<env>-ca-root`, `<env>-ca-subordinate`) persist like the KMS key
+    ids, so the pools (`<env>-cas-root`, `<env>-cas-subordinate`) persist like the KMS key
     (ADR-0002, amended).
   - **Issuance** — **cert-manager** with the **`google-cas-issuer`** requests a leaf from CAS,
     writes it to a Secret, and the gateway references it (`tls.certificateRefs`). Leaves

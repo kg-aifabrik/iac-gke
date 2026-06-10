@@ -191,11 +191,11 @@ appear in public Certificate Transparency logs (ADR-0002). Certificate Authority
 holds the hierarchy — **instantiated from the foundation root, not the cluster roots**: the
 root CA outlives cluster rebuilds (MDM-distributed trust must not churn), and Google
 permanently retires a deleted CaPool id (the original `dev-root`/`dev-subordinate` names are
-burned — hence pools named `<env>-ca-root`/`<env>-ca-subordinate`). A `fop` destroy never
+burned — hence pools named `<env>-cas-root`/`<env>-cas-subordinate`). A `fop` destroy never
 touches CAS; like the KMS key, it persists (ADR-0002 amendment):
 
 - **Root + subordinate** — a self-signed root (10-year, kept cold) signs a per-environment
-  subordinate (5-year) that issues the leaf certificates; both `ENTERPRISE` tier, RSA-4096.
+  subordinate (5-year) that issues the leaf certificates; **DEVOPS** tier in dev (~10x cheaper; stage/prod use `ENTERPRISE`), RSA-4096.
   Unprotected (dev) CAs purge immediately on destroy so their pools delete cleanly in one run;
   protected (prod) CAs keep the 30-day recovery window (see the lock/teardown notes and #31).
 - **cert-manager identity** — a Google service account that google-cas-issuer impersonates via

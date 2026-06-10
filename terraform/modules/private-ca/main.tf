@@ -6,9 +6,17 @@
 # Lifetime: instantiated from the per-project FOUNDATION root (like the KMS
 # key), not the per-cluster roots — the root CA must outlive cluster rebuilds
 # (MDM-distributed trust breaks if it churns), and Google permanently RETIRES
-# a deleted CaPool id (observed: dev-root/dev-subordinate burned at the M2
-# teardown, run 27249785152). Hence the "-ca-" infix in the pool names: the
-# original ids can never be used again.
+# a deleted CaPool id. Burned ids so far: dev-root/dev-subordinate (M2 teardown)
+# and dev-ca-root/dev-ca-subordinate (deleted when dev moved from the ENTERPRISE
+# to the DEVOPS tier — tier is immutable on a pool, so the switch replaces it).
+# The "-cas-" infix is the current, fresh generation; if ever burned again, bump
+# it (cas -> cas2 ...). Because CAS now PERSISTS in the foundation it should not
+# churn, so one fresh name suffices.
+#
+# Tier: DEVOPS for dev (~10x cheaper; no revocation/CRL, fine for short-lived
+# auto-rotated internal leaves) — set on the dev foundation. Stage/prod keep the
+# ENTERPRISE default. The premium tier left standing was this milestone's
+# headline cost (see the retrospective).
 #
 # Terraform owns the Google resources (this module). The cert-manager add-on and
 # the trust-manager bundle that distributes the root are in-cluster manifests.
@@ -26,7 +34,7 @@ locals {
 
 resource "google_privateca_ca_pool" "root" {
   project  = var.project_id
-  name     = "${var.environment}-ca-root"
+  name     = "${var.environment}-cas-root"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -36,7 +44,7 @@ resource "google_privateca_certificate_authority" "root" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.root.name
-  certificate_authority_id = "${var.environment}-ca-root"
+  certificate_authority_id = "${var.environment}-cas-root"
   type                     = "SELF_SIGNED"
   lifetime                 = var.root_ca_lifetime
   labels                   = var.labels
@@ -80,7 +88,7 @@ resource "google_privateca_certificate_authority" "root" {
 
 resource "google_privateca_ca_pool" "subordinate" {
   project  = var.project_id
-  name     = "${var.environment}-ca-subordinate"
+  name     = "${var.environment}-cas-subordinate"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -90,7 +98,7 @@ resource "google_privateca_certificate_authority" "subordinate" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.subordinate.name
-  certificate_authority_id = "${var.environment}-ca-subordinate"
+  certificate_authority_id = "${var.environment}-cas-subordinate"
   type                     = "SUBORDINATE"
   lifetime                 = var.subordinate_ca_lifetime
   labels                   = var.labels

@@ -23,9 +23,14 @@ variable "workload_pool" {
 }
 
 variable "cas_tier" {
-  description = "CAS pool tier. ENTERPRISE tracks issued certs and supports revocation."
+  description = "CAS pool tier. ENTERPRISE tracks issued certs and supports revocation/CRL (~10x the per-CA cost); DEVOPS is the lean tier for short-lived auto-rotated leaves. Default ENTERPRISE (prod-safe); dev overrides to DEVOPS."
   type        = string
   default     = "ENTERPRISE"
+
+  validation {
+    condition     = contains(["ENTERPRISE", "DEVOPS"], var.cas_tier)
+    error_message = "cas_tier must be ENTERPRISE or DEVOPS."
+  }
 }
 
 variable "organization" {
