@@ -272,7 +272,9 @@ check_internal_ingress() {
   log "  waiting for the internal load balancer to program (up to ~7 min)..."
   local hosts_script="" host logs="" attempt phase
   for host in "${INTERNAL_HOSTS[@]}"; do
-    hosts_script+="curl -sS --max-time 15 --cacert /trust/ca.crt -o /tmp/b -w \"${host}:HTTP:%{http_code}\\n\" https://${host}/ && cat /tmp/b; "
+    # Single quotes inside the command: the pod manifest wraps the whole script
+    # in a double-quoted YAML scalar, so embedded double quotes break the YAML.
+    hosts_script+="curl -sS --max-time 15 --cacert /trust/ca.crt -o /tmp/b -w '${host}:HTTP:%{http_code}\\n' https://${host}/ && cat /tmp/b; "
   done
   for attempt in $(seq 1 10); do
     kubectl -n internal-tools delete pod ingress-test --ignore-not-found >/dev/null 2>&1 || true
