@@ -23,15 +23,6 @@ module "foundation" {
 # outlive cluster rebuilds (MDM-distributed trust), and Google permanently
 # retires a deleted CaPool id — so the pools persist like the KMS key
 # (ADR-0002, amended at the Milestone 3 bring-up).
-# One-shot adoption (remove after the HA-8 bring-up): the cert-manager GSA was
-# created by the fop root before the CA hierarchy moved here; adopt it instead
-# of failing on 409. The matching `removed` block in the fop root forgets it
-# there without destroying it.
-import {
-  to = module.private_ca.google_service_account.cert_manager
-  id = "projects/${var.project_id}/serviceAccounts/cert-manager-cas@${var.project_id}.iam.gserviceaccount.com"
-}
-
 module "private_ca" {
   source = "../../../modules/private-ca"
 

@@ -67,16 +67,3 @@ module "stack" {
   # Registry to restore no-public-egress is tracked separately.
   enable_cloud_nat = true
 }
-
-# One-shot (remove after the HA-8 bring-up): the first Milestone-3 apply
-# created the private-ca resources here before the CA hierarchy moved to the
-# foundation (ADR-0002 amendment). Forget them WITHOUT destroying — the
-# foundation imports and owns the service account now; destroying it here
-# would break the identity the foundation manages.
-removed {
-  from = module.stack.module.private_ca
-
-  lifecycle {
-    destroy = false
-  }
-}
