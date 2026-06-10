@@ -464,21 +464,24 @@ check_node_autoscale() {
   local nodes_before
   nodes_before="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
   render "${SCRIPT_DIR}/08-autoscale/deployment.yaml" | kubectl apply -f -
-  kubectl -n "${NS}" scale deploy/capacity-demand --replicas=6 >/dev/null
+  # 3 x 500m: enough that the baseline nodes can't hold them (each fresh
+  # e2-medium fits ~one 500m pod after DaemonSet overhead), small enough to be
+  # reachable inside the pool's 2-per-zone ceiling.
+  kubectl -n "${NS}" scale deploy/capacity-demand --replicas=3 >/dev/null
   # Scale-out: CA reacts to the pending pods in ~1 min; a node boots in ~2 min.
   log "  waiting for the autoscaler to add capacity (up to ~8 min)..."
   local ready nodes_after attempt
   for attempt in $(seq 1 32); do
     ready="$(kubectl -n "${NS}" get deploy capacity-demand -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
-    [[ "${ready:-0}" == "6" ]] && break
+    [[ "${ready:-0}" == "3" ]] && break
     sleep 15
   done
   nodes_after="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
   kubectl -n "${NS}" scale deploy/capacity-demand --replicas=1 >/dev/null 2>&1 || true
-  if [[ "${ready:-0}" == "6" ]] && (( nodes_after > nodes_before )); then
-    record PASS node-autoscale "6/6 replicas running; nodes ${nodes_before} -> ${nodes_after} (scale-in is slow by design, ~10 min)"
+  if [[ "${ready:-0}" == "3" ]] && (( nodes_after > nodes_before )); then
+    record PASS node-autoscale "3/3 x 500m running; nodes ${nodes_before} -> ${nodes_after} (scale-in is slow by design, ~10 min)"
   else
-    record FAIL node-autoscale "ready=${ready:-0}/6, nodes ${nodes_before} -> ${nodes_after}"
+    record FAIL node-autoscale "ready=${ready:-0}/3, nodes ${nodes_before} -> ${nodes_after}: $(kubectl -n "${NS}" get events --field-selector reason=FailedScheduling -o jsonpath='{.items[-1:].message}' 2>/dev/null | tr -s ' \n' ' ' | tail -c 160)"
   fi
 }
 
@@ -547,7 +550,7 @@ check_backup_restore() {
   fi
   CREATED_BACKUP="val-${stamp}"
   log "  creating on-demand backup ${CREATED_BACKUP} (waits for completion)..."
-  if ! gcloud backup-restore backups create "${CREATED_BACKUP}" --project "${PROJECT_ID}" \
+  if ! gcloud beta container backup-restore backups create "${CREATED_BACKUP}" --project "${PROJECT_ID}" \
       --location "${LOCATION}" --backup-plan "${BACKUP_PLAN}" --wait-for-completion --quiet >/dev/null; then
     record FAIL backup-restore "on-demand backup did not complete"; return
   fi
@@ -555,7 +558,7 @@ check_backup_restore() {
   kubectl delete namespace "${NS}" --wait --timeout=300s >/dev/null
   CREATED_RESTORE="val-${stamp}"
   log "  restoring (waits for completion)..."
-  if ! gcloud backup-restore restores create "${CREATED_RESTORE}" --project "${PROJECT_ID}" \
+  if ! gcloud beta container backup-restore restores create "${CREATED_RESTORE}" --project "${PROJECT_ID}" \
       --location "${LOCATION}" --restore-plan "${RESTORE_PLAN}" \
       --backup "projects/${PROJECT_ID}/locations/${LOCATION}/backupPlans/${BACKUP_PLAN}/backups/${CREATED_BACKUP}" \
       --wait-for-completion --quiet >/dev/null; then
@@ -596,11 +599,11 @@ do_cleanup() {
   # hygiene): delete every val-* restore + backup, not just this run's.
   if [[ -n "${BACKUP_PLAN:-}" ]]; then
     local r b
-    for r in $(gcloud backup-restore restores list --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
-      gcloud backup-restore restores delete "${r}" --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --quiet 2>/dev/null || true
+    for r in $(gcloud beta container backup-restore restores list --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
+      gcloud beta container backup-restore restores delete "${r}" --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --quiet 2>/dev/null || true
     done
-    for b in $(gcloud backup-restore backups list --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
-      gcloud backup-restore backups delete "${b}" --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --quiet 2>/dev/null || true
+    for b in $(gcloud beta container backup-restore backups list --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
+      gcloud beta container backup-restore backups delete "${b}" --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --quiet 2>/dev/null || true
     done
   fi
 }
