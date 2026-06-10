@@ -432,19 +432,30 @@ check_regional_pvc() {
     kubectl drain "${n#node/}" --ignore-daemonsets --delete-emptydir-data --force \
       --timeout=360s >/dev/null 2>&1 || true
   done
-  local ok=0
+  local ok=0 why=""
   if kubectl -n "${NS}" rollout status deploy/regional-writer --timeout=420s >/dev/null 2>&1; then
     pod="$(kubectl -n "${NS}" get pod -l app=regional-writer --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     local new_zone read_back
     new_zone="$(kubectl get node "$(kubectl -n "${NS}" get pod "${pod}" -o jsonpath='{.spec.nodeName}')" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}' 2>/dev/null || true)"
     read_back="$(kubectl -n "${NS}" exec "${pod}" -- cat /data/marker 2>/dev/null || true)"
-    [[ "${read_back}" == "${marker}" && "${new_zone}" != "${zone}" ]] && ok=1
+    if [[ "${new_zone}" == "${zone}" ]]; then
+      why="pod landed back in the SAME zone ${zone} (was it really drained?)"
+    elif [[ "${read_back}" != "${marker}" ]]; then
+      why="rescheduled to ${new_zone:-?} but marker mismatch (got '${read_back}')"
+    else
+      ok=1
+    fi
+  else
+    # Surface the scheduler's own words — capacity vs volume-affinity tells
+    # the fix apart (add headroom vs pin StorageClass allowedTopologies).
+    why="pod not Ready in 420s: $(kubectl -n "${NS}" get events --field-selector reason=FailedScheduling \
+      -o jsonpath='{.items[-1:].message}' 2>/dev/null | tr -s ' \n' ' ' | tail -c 200)"
   fi
   for n in ${z_nodes}; do kubectl uncordon "${n#node/}" >/dev/null 2>&1 || true; done
   if (( ok )); then
     record PASS regional-pvc "pod rescheduled from ${zone} to ${new_zone:-?} with data intact"
   else
-    record FAIL regional-pvc "pod did not reschedule cross-zone with its data (zone ${zone})"
+    record FAIL regional-pvc "${why}"
   fi
 }
 
