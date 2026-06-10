@@ -115,6 +115,13 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y -qq google-cloud-cli-gke-gcloud-auth-plugin
           fi
+          # The plugin shells out to `gcloud config config-helper`, which needs
+          # an ACTIVE gcloud account — not just Application Default Credentials.
+          # Whether one exists depends on runner-image state (the apt install
+          # above can shadow the preinstalled, authenticated gcloud), so
+          # activate the workflow's federated credentials explicitly
+          # (observed: run 27250995161, "no active account selected").
+          gcloud auth login --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}" --quiet
           cluster="$(terraform -chdir="$TF_ROOT" output -raw cluster_name)"
           gsa="$(terraform -chdir="$TF_ROOT" output -raw cert_manager_gsa_email)"
           terraform -chdir="$TF_ROOT" output -raw incluster_manifests > incluster.yaml
