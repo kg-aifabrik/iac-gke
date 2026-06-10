@@ -333,6 +333,7 @@ start_probe() {
     done >>"${PROBE_FILE}"
   ) &
   PROBE_PID=$!
+  disown
 }
 
 # Stops the probe and reports "<total> <failures>".
@@ -362,11 +363,15 @@ check_drain_survival() {
   fi
   start_probe
   DRAINED_NODE="${node}"
-  if ! kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data \
-      --timeout=240s >/dev/null 2>&1; then
+  # --force: earlier cases leave throwaway NAKED pods (pvc-writer,
+  # wi-secret-reader) that drain refuses to touch otherwise; PDBs of managed
+  # pods are still honored — which is exactly what this case tests. 360s gives
+  # the autoscaler room to add a node if the evictees need new capacity.
+  if ! kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data --force \
+      --timeout=360s >/tmp/drain.log 2>&1; then
     read -r _ _ < <(stop_probe)
     kubectl uncordon "${node}" >/dev/null 2>&1 || true; DRAINED_NODE=""
-    record FAIL drain-survival "drain of ${node} did not complete (PDB blocked too long?)"
+    record FAIL drain-survival "drain of ${node} failed: $(tail -1 /tmp/drain.log | tr -d '\n' | tail -c 140)"
     return
   fi
   kubectl -n public-services rollout status deploy/hello-web --timeout=180s >/dev/null 2>&1 || true
@@ -422,7 +427,8 @@ check_regional_pvc() {
   local z_nodes n
   z_nodes="$(kubectl get nodes -l "topology.kubernetes.io/zone=${zone}" -o name)"
   for n in ${z_nodes}; do
-    kubectl drain "${n#node/}" --ignore-daemonsets --delete-emptydir-data --timeout=300s >/dev/null 2>&1 || true
+    kubectl drain "${n#node/}" --ignore-daemonsets --delete-emptydir-data --force \
+      --timeout=360s >/dev/null 2>&1 || true
   done
   local ok=0
   if kubectl -n "${NS}" rollout status deploy/regional-writer --timeout=420s >/dev/null 2>&1; then
@@ -514,6 +520,11 @@ check_backup_restore() {
   if [[ -z "${BACKUP_PLAN}" || -z "${RESTORE_PLAN}" ]]; then
     record SKIP backup-restore "backup/restore plan outputs not set"; return
   fi
+  # The drain cases force-evict naked pods, which deletes pvc-writer (it has
+  # no controller to bring it back) — re-apply it so the marker can be written.
+  render "${SCRIPT_DIR}/02-encrypted-pvc/pvc.yaml" | kubectl apply -f - >/dev/null
+  render "${SCRIPT_DIR}/02-encrypted-pvc/pod.yaml" | kubectl apply -f - >/dev/null
+  kubectl -n "${NS}" wait --for=condition=Ready pod/pvc-writer --timeout=240s >/dev/null 2>&1 || true
   # A fresh marker on the encrypted volume is what must come back.
   local marker stamp
   stamp="$(date +%s)"
