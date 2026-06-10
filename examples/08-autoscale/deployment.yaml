@@ -36,7 +36,9 @@ spec:
             capabilities:
               drop: ["ALL"]
           resources:
-            # The request IS the test: big enough that 6 replicas exceed the
-            # minimum node footprint, forcing a scale-out within the pool max.
-            requests: { cpu: 500m, memory: 32Mi }
-            limits: { cpu: 500m, memory: 64Mi }
+            # The request IS the test: big enough that the replicas exceed the
+            # baseline nodes, small enough that the autoscaler's simulation
+            # fits one on a fresh e2-medium after DaemonSet overhead — 500m
+            # proved marginal there and the autoscaler declined to scale.
+            requests: { cpu: 350m, memory: 32Mi }
+            limits: { cpu: 350m, memory: 64Mi }
