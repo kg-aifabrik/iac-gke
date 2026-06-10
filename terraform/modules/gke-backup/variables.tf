@@ -38,6 +38,16 @@ variable "kms_key_id" {
   type        = string
 }
 
+variable "restore_namespaces" {
+  description = "Workload namespaces the restore plan may DELETE_AND_RESTORE. Never include platform namespaces (gateway-system, cert-manager) — replaying those tears down ingress and issuance mid-restore."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.restore_namespaces) > 0
+    error_message = "restore_namespaces needs at least one workload namespace."
+  }
+}
+
 variable "labels" {
   description = "Labels for the plans."
   type        = map(string)

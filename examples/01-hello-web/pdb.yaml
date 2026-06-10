@@ -1,0 +1,13 @@
+# PodDisruptionBudget: with 2 replicas spread across zones, a voluntary
+# disruption (node drain, upgrade) may evict at most one replica at a time —
+# the service never drops to zero during maintenance.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hello-web
+  namespace: examples
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hello-web

@@ -42,6 +42,12 @@ resource "google_gke_backup_backup_plan" "this" {
 # The pinned restore policy: namespaced resources from the backup replace what
 # exists (delete-and-restore), volumes restore from backup data, cluster-scoped
 # resources are not touched (they belong to the platform, not the backup).
+#
+# Scope: WORKLOAD namespaces only — never all_namespaces. DELETE_AND_RESTORE on
+# an unrestricted scope would delete and recreate the platform namespaces
+# (gateway-system, cert-manager) mid-restore, tearing down ingress and
+# certificate issuance. The backup still CAPTURES everything; the restore plan
+# pins what may be replayed.
 resource "google_gke_backup_restore_plan" "this" {
   project     = var.project_id
   name        = "${var.name}-restore"
@@ -51,7 +57,9 @@ resource "google_gke_backup_restore_plan" "this" {
   labels      = var.labels
 
   restore_config {
-    all_namespaces                   = true
+    selected_namespaces {
+      namespaces = var.restore_namespaces
+    }
     namespaced_resource_restore_mode = "DELETE_AND_RESTORE"
     volume_data_restore_policy       = "RESTORE_VOLUME_DATA_FROM_BACKUP"
 

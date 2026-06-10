@@ -1,0 +1,42 @@
+# Capacity-demand workload for the node-autoscaling validation (ADR-0007).
+# Each replica requests 500m CPU; scaling the Deployment beyond what the
+# current nodes hold makes pods unschedulable, which is exactly what triggers
+# the cluster autoscaler (it scales on pending pods, not metrics). The
+# validation scales it out, asserts a node is added and every replica runs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capacity-demand
+  namespace: examples
+  labels:
+    app: capacity-demand
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: capacity-demand
+  template:
+    metadata:
+      labels:
+        app: capacity-demand
+    spec:
+      priorityClassName: workload-default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ${REGISTRY_PROXY}/library/busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            # The request IS the test: big enough that 6 replicas exceed the
+            # minimum node footprint, forcing a scale-out within the pool max.
+            requests: { cpu: 500m, memory: 32Mi }
+            limits: { cpu: 500m, memory: 64Mi }

@@ -3,9 +3,11 @@
 # Post-build, end-user validation for a freshly built dev-FOP cluster (WLD-2).
 #
 # Deploys each example over Connect Gateway and asserts the outcome a real user
-# would observe — a client call returns HTTP 200 with the expected body, the
-# encrypted volume mounts and persists across pods, an Artifact Registry pull
-# is admitted, and a pod reads a Secret Manager secret via Workload Identity.
+# would observe — serving over both gateways (every hostname, internal ones by
+# NAME through the private zone), persistence, supply chain, Workload Identity,
+# and the high-availability behaviors: a node drain and a rolling deploy with
+# zero failed requests, node autoscaling, HPA, regional-disk zone failover,
+# backup→restore, and priority preemption (Milestone 3, issue #34).
 # Run by an operator at milestone bring-up; paste the summary into the issue.
 #
 # Prereqs: gcloud + kubectl + the gke-gcloud-auth-plugin; operator-level project
@@ -59,7 +61,11 @@ render() {
   sed -e "s|\${REGISTRY_PROXY}|${REGISTRY_PROXY}|g" \
       -e "s|\${PROJECT_ID}|${PROJECT_ID}|g" \
       -e "s|\${WI_GSA}|${WI_GSA}|g" \
-      -e "s|\${SECRET_NAME}|${SECRET_NAME}|g" "$1"
+      -e "s|\${SECRET_NAME}|${SECRET_NAME}|g" \
+      -e "s|\${EXTERNAL_HOST_1}|${EXTERNAL_HOSTS[0]:-}|g" \
+      -e "s|\${EXTERNAL_HOST_2}|${EXTERNAL_HOSTS[1]:-${EXTERNAL_HOSTS[0]:-}}|g" \
+      -e "s|\${INTERNAL_HOST_1}|${INTERNAL_HOSTS[0]:-}|g" \
+      -e "s|\${INTERNAL_HOST_2}|${INTERNAL_HOSTS[1]:-${INTERNAL_HOSTS[0]:-}}|g" "$1"
 }
 
 resolve_config() {
@@ -72,14 +78,19 @@ resolve_config() {
   [[ -n "${PROJECT_ID}" ]] || PROJECT_ID="$(printf '%s' "${REGISTRY_PROXY}" | cut -d/ -f2)"
   [[ -n "${PROJECT_ID}" ]] || die "could not resolve PROJECT_ID"
   WI_GSA="${KSA}@${PROJECT_ID}.iam.gserviceaccount.com"
-  EXTERNAL_HOSTNAME="${EXTERNAL_HOSTNAME:-app.dev.arthos.app}"
-  INTERNAL_HOSTNAME="${INTERNAL_HOSTNAME:-hello.internal.dev.arthos.app}"
+  # Hostname lists come comma-joined from the fop outputs (multi-host, ADR-0005).
+  IFS=',' read -r -a EXTERNAL_HOSTS <<<"${EXTERNAL_HOSTNAMES:-$(tf_out external_hostnames)}"
+  IFS=',' read -r -a INTERNAL_HOSTS <<<"${INTERNAL_HOSTNAMES:-$(tf_out internal_hostnames)}"
   EXTERNAL_IP="${EXTERNAL_IP:-$(tf_out external_gateway_ip)}"
   INTERNAL_IP="${INTERNAL_IP:-$(tf_out internal_gateway_ip)}"
+  BACKUP_PLAN="${BACKUP_PLAN:-$(tf_out backup_plan_name)}"
+  RESTORE_PLAN="${RESTORE_PLAN:-$(tf_out restore_plan_name)}"
+  LOCATION="${LOCATION:-$(tf_out location)}"
   log "Config"
-  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)  internal=%s (%s)\n' \
+  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)\n  internal=%s (%s)\n  backup-plan=%s restore-plan=%s\n' \
     "${PROJECT_ID}" "${CLUSTER}" "${REGISTRY_PROXY}" \
-    "${EXTERNAL_HOSTNAME}" "${EXTERNAL_IP:-?}" "${INTERNAL_HOSTNAME}" "${INTERNAL_IP:-?}"
+    "${EXTERNAL_HOSTS[*]:-?}" "${EXTERNAL_IP:-?}" "${INTERNAL_HOSTS[*]:-?}" "${INTERNAL_IP:-?}" \
+    "${BACKUP_PLAN:-?}" "${RESTORE_PLAN:-?}"
 }
 
 connect() {
@@ -216,21 +227,28 @@ check_external_ingress() {
     record FAIL external-ingress "deployment did not become ready"
     return
   fi
-  # --resolve hits the gateway IP directly; the public cert still validates by
-  # SNI/hostname (no -k). The global load balancer takes minutes to program its
-  # HTTPS frontend after the cert goes ACTIVE, so retry until it serves.
+  # --resolve hits the gateway IP directly; each host's own cert still
+  # validates by SNI (no -k), so this also proves per-host certificates
+  # (ADR-0005). The global load balancer takes minutes to program its HTTPS
+  # frontend after the certs go ACTIVE, so retry until every host serves.
   log "  waiting for the external load balancer to program (up to ~6 min)..."
-  local code="" attempt
-  for attempt in $(seq 1 18); do
-    code="$(curl -sS --max-time 15 --resolve "${EXTERNAL_HOSTNAME}:443:${EXTERNAL_IP}" \
-      -o /tmp/ext_body -w '%{http_code}' "https://${EXTERNAL_HOSTNAME}/" 2>/tmp/ext_err || true)"
-    [[ "${code}" == "200" ]] && break
-    sleep 20
+  local host code="" failed="" attempt
+  for host in "${EXTERNAL_HOSTS[@]}"; do
+    code=""
+    for attempt in $(seq 1 18); do
+      code="$(curl -sS --max-time 15 --resolve "${host}:443:${EXTERNAL_IP}" \
+        -o /tmp/ext_body -w '%{http_code}' "https://${host}/" 2>/tmp/ext_err || true)"
+      [[ "${code}" == "200" ]] && break
+      sleep 20
+    done
+    if [[ "${code}" != "200" ]] || ! grep -q "Hello World" /tmp/ext_body 2>/dev/null; then
+      failed+="${host}=HTTP'${code}' "
+    fi
   done
-  if [[ "${code}" == "200" ]] && grep -q "Hello World" /tmp/ext_body 2>/dev/null; then
-    record PASS external-ingress "HTTPS 200 + 'Hello World' with a publicly-trusted cert at ${EXTERNAL_HOSTNAME}"
+  if [[ -z "${failed}" ]]; then
+    record PASS external-ingress "HTTPS 200 + 'Hello World' with per-host publicly-trusted certs at: ${EXTERNAL_HOSTS[*]}"
   else
-    record FAIL external-ingress "HTTP '${code}' ($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 100)); LB programmed? cert ACTIVE?"
+    record FAIL external-ingress "${failed}($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 80)); LB programmed? certs ACTIVE?"
   fi
 }
 
@@ -245,12 +263,17 @@ check_internal_ingress() {
     record FAIL internal-ingress "deployment did not become ready"
     return
   fi
-  # The internal VIP is private, so curl from an in-cluster pod, trusting the CAS
-  # root that trust-manager distributed (the cas-root ConfigMap). The internal
-  # ALB also takes a few minutes to program its route/backend, so re-run the
-  # probe pod until it answers 200.
+  # The internal VIP is private, so curl from an in-cluster pod, trusting the
+  # CAS root that trust-manager distributed (the cas-root ConfigMap). The pod
+  # resolves each hostname BY NAME — through the Cloud DNS private zone, the
+  # path a real internal client takes (no --resolve, ADR-0006) — and verifies
+  # the multi-SAN CAS cert against the root for every host. The internal ALB
+  # takes a few minutes to program, so re-run the probe pod until it answers.
   log "  waiting for the internal load balancer to program (up to ~7 min)..."
-  local logs="" attempt phase
+  local hosts_script="" host logs="" attempt phase
+  for host in "${INTERNAL_HOSTS[@]}"; do
+    hosts_script+="curl -sS --max-time 15 --cacert /trust/ca.crt -o /tmp/b -w \"${host}:HTTP:%{http_code}\\n\" https://${host}/ && cat /tmp/b; "
+  done
   for attempt in $(seq 1 10); do
     kubectl -n internal-tools delete pod ingress-test --ignore-not-found >/dev/null 2>&1 || true
     cat <<EOF | kubectl apply -f - >/dev/null
@@ -263,7 +286,7 @@ spec:
   containers:
     - name: curl
       image: ${REGISTRY_PROXY}/curlimages/curl:8.10.1
-      command: ["sh", "-c", "curl -sS --max-time 15 --cacert /trust/ca.crt --resolve ${INTERNAL_HOSTNAME}:443:${INTERNAL_IP} -o /tmp/b -w 'HTTP:%{http_code}\\n' https://${INTERNAL_HOSTNAME}/; cat /tmp/b"]
+      command: ["sh", "-c", "${hosts_script}"]
       securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
       volumeMounts:
         - { name: trust, mountPath: /trust, readOnly: true }
@@ -281,13 +304,246 @@ EOF
       sleep 5
     done
     logs="$(kubectl -n internal-tools logs ingress-test 2>/dev/null || true)"
-    grep -q "HTTP:200" <<<"${logs}" && break
+    [[ "$(grep -c ":HTTP:200" <<<"${logs}")" -eq "${#INTERNAL_HOSTS[@]}" ]] && break
     sleep 15
   done
-  if grep -q "HTTP:200" <<<"${logs}" && grep -q "Hello World" <<<"${logs}"; then
-    record PASS internal-ingress "HTTPS 200 + 'Hello World' with the CAS cert (verified against the CAS root)"
+  if [[ "$(grep -c ":HTTP:200" <<<"${logs}")" -eq "${#INTERNAL_HOSTS[@]}" ]] && grep -q "Hello World" <<<"${logs}"; then
+    record PASS internal-ingress "HTTPS 200 by NAME via the private zone, CAS cert verified, for: ${INTERNAL_HOSTS[*]}"
   else
     record FAIL internal-ingress "unexpected response: $(tr '\n' ' ' <<<"${logs}" | tail -c 140)"
+  fi
+}
+
+
+# --- high-availability checks (Milestone 3, issue #34) ----------------------
+
+# Continuous probe against the first external hostname (1 req/s) — the
+# drain/rolling checks assert ZERO non-200s while disruption is in progress.
+PROBE_FILE=""
+PROBE_PID=""
+start_probe() {
+  PROBE_FILE="$(mktemp)"
+  (
+    while :; do
+      curl -sS --max-time 5 --resolve "${EXTERNAL_HOSTS[0]}:443:${EXTERNAL_IP}" \
+        -o /dev/null -w '%{http_code}\n' "https://${EXTERNAL_HOSTS[0]}/" 2>/dev/null || echo 000
+      sleep 1
+    done >>"${PROBE_FILE}"
+  ) &
+  PROBE_PID=$!
+}
+
+# Stops the probe and reports "<total> <failures>".
+stop_probe() {
+  kill "${PROBE_PID}" 2>/dev/null || true
+  wait "${PROBE_PID}" 2>/dev/null || true
+  local total failures
+  total="$(wc -l <"${PROBE_FILE}" | tr -d ' ')"
+  failures="$(grep -cv '^200$' "${PROBE_FILE}" || true)"
+  rm -f "${PROBE_FILE}"
+  echo "${total} ${failures}"
+}
+
+DRAINED_NODE=""
+check_drain_survival() {
+  log "07 — drain survival (zero failed requests while a node drains)"
+  if [[ -z "${EXTERNAL_IP}" ]]; then
+    record SKIP drain-survival "needs the external gateway serving (run after 05)"; return
+  fi
+  # Drain the node hosting one hello-web replica; spread + PDB + the gateway's
+  # health checks must keep the OTHER replica serving throughout.
+  local node
+  node="$(kubectl -n public-services get pod -l app=hello-web \
+    -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)"
+  if [[ -z "${node}" ]]; then
+    record FAIL drain-survival "no hello-web pod found in public-services"; return
+  fi
+  start_probe
+  DRAINED_NODE="${node}"
+  if ! kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data \
+      --timeout=240s >/dev/null 2>&1; then
+    read -r _ _ < <(stop_probe)
+    kubectl uncordon "${node}" >/dev/null 2>&1 || true; DRAINED_NODE=""
+    record FAIL drain-survival "drain of ${node} did not complete (PDB blocked too long?)"
+    return
+  fi
+  kubectl -n public-services rollout status deploy/hello-web --timeout=180s >/dev/null 2>&1 || true
+  sleep 5
+  local total failures
+  read -r total failures < <(stop_probe)
+  kubectl uncordon "${node}" >/dev/null 2>&1 || true
+  DRAINED_NODE=""
+  if (( total > 0 && failures == 0 )); then
+    record PASS drain-survival "node ${node} drained; ${total} requests, 0 failures"
+  else
+    record FAIL drain-survival "${failures}/${total} requests failed during the drain"
+  fi
+}
+
+check_rolling_deploy() {
+  log "08 — zero-downtime rolling deploy"
+  if [[ -z "${EXTERNAL_IP}" ]]; then
+    record SKIP rolling-deploy "needs the external gateway serving (run after 05)"; return
+  fi
+  start_probe
+  kubectl -n public-services rollout restart deploy/hello-web >/dev/null
+  if ! kubectl -n public-services rollout status deploy/hello-web --timeout=240s >/dev/null; then
+    read -r _ _ < <(stop_probe)
+    record FAIL rolling-deploy "rollout did not complete"; return
+  fi
+  sleep 5
+  local total failures
+  read -r total failures < <(stop_probe)
+  if (( total > 0 && failures == 0 )); then
+    record PASS rolling-deploy "rolling restart completed; ${total} requests, 0 failures"
+  else
+    record FAIL rolling-deploy "${failures}/${total} requests failed during the rollout"
+  fi
+}
+
+check_regional_pvc() {
+  log "09 — regional PD zone failover (data survives the zone's nodes draining)"
+  render "${SCRIPT_DIR}/07-regional-pvc/pvc.yaml" | kubectl apply -f -
+  render "${SCRIPT_DIR}/07-regional-pvc/deployment.yaml" | kubectl apply -f -
+  if ! kubectl -n "${NS}" rollout status deploy/regional-writer --timeout=300s >/dev/null; then
+    record FAIL regional-pvc "regional-writer did not become ready"; return
+  fi
+  local pod marker node zone
+  pod="$(kubectl -n "${NS}" get pod -l app=regional-writer -o jsonpath='{.items[0].metadata.name}')"
+  marker="regional-$(date +%s)"
+  kubectl -n "${NS}" exec "${pod}" -- sh -c "echo '${marker}' > /data/marker"
+  node="$(kubectl -n "${NS}" get pod "${pod}" -o jsonpath='{.spec.nodeName}')"
+  zone="$(kubectl get node "${node}" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}')"
+  # Drain every node in the pod's zone: the replacement pod can only land in
+  # another zone, and the regional disk must follow it.
+  log "  draining zone ${zone} (node(s) hosting the volume)..."
+  local z_nodes n
+  z_nodes="$(kubectl get nodes -l "topology.kubernetes.io/zone=${zone}" -o name)"
+  for n in ${z_nodes}; do
+    kubectl drain "${n#node/}" --ignore-daemonsets --delete-emptydir-data --timeout=300s >/dev/null 2>&1 || true
+  done
+  local ok=0
+  if kubectl -n "${NS}" rollout status deploy/regional-writer --timeout=420s >/dev/null 2>&1; then
+    pod="$(kubectl -n "${NS}" get pod -l app=regional-writer --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+    local new_zone read_back
+    new_zone="$(kubectl get node "$(kubectl -n "${NS}" get pod "${pod}" -o jsonpath='{.spec.nodeName}')" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}' 2>/dev/null || true)"
+    read_back="$(kubectl -n "${NS}" exec "${pod}" -- cat /data/marker 2>/dev/null || true)"
+    [[ "${read_back}" == "${marker}" && "${new_zone}" != "${zone}" ]] && ok=1
+  fi
+  for n in ${z_nodes}; do kubectl uncordon "${n#node/}" >/dev/null 2>&1 || true; done
+  if (( ok )); then
+    record PASS regional-pvc "pod rescheduled from ${zone} to ${new_zone:-?} with data intact"
+  else
+    record FAIL regional-pvc "pod did not reschedule cross-zone with its data (zone ${zone})"
+  fi
+}
+
+check_node_autoscale() {
+  log "10 — node autoscaling (pending pods add a node; ADR-0007)"
+  local nodes_before
+  nodes_before="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
+  render "${SCRIPT_DIR}/08-autoscale/deployment.yaml" | kubectl apply -f -
+  kubectl -n "${NS}" scale deploy/capacity-demand --replicas=6 >/dev/null
+  # Scale-out: CA reacts to the pending pods in ~1 min; a node boots in ~2 min.
+  log "  waiting for the autoscaler to add capacity (up to ~8 min)..."
+  local ready nodes_after attempt
+  for attempt in $(seq 1 32); do
+    ready="$(kubectl -n "${NS}" get deploy capacity-demand -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+    [[ "${ready:-0}" == "6" ]] && break
+    sleep 15
+  done
+  nodes_after="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
+  kubectl -n "${NS}" scale deploy/capacity-demand --replicas=1 >/dev/null 2>&1 || true
+  if [[ "${ready:-0}" == "6" ]] && (( nodes_after > nodes_before )); then
+    record PASS node-autoscale "6/6 replicas running; nodes ${nodes_before} -> ${nodes_after} (scale-in is slow by design, ~10 min)"
+  else
+    record FAIL node-autoscale "ready=${ready:-0}/6, nodes ${nodes_before} -> ${nodes_after}"
+  fi
+}
+
+check_hpa() {
+  log "11 — Horizontal Pod Autoscaler (load scales replicas out)"
+  render "${SCRIPT_DIR}/09-hpa/hpa.yaml" | kubectl apply -f -
+  if ! kubectl -n "${NS}" rollout status deploy/hpa-web --timeout=180s >/dev/null; then
+    record FAIL hpa "hpa-web did not become ready"; return
+  fi
+  log "  waiting for metrics + scale-out (up to ~6 min)..."
+  local replicas attempt
+  for attempt in $(seq 1 24); do
+    replicas="$(kubectl -n "${NS}" get hpa hpa-web -o jsonpath='{.status.currentReplicas}' 2>/dev/null || echo 1)"
+    (( ${replicas:-1} > 1 )) && break
+    sleep 15
+  done
+  # Stop the load either way so the cluster quiets down for later checks.
+  kubectl -n "${NS}" scale deploy/hpa-load --replicas=0 >/dev/null 2>&1 || true
+  if (( ${replicas:-1} > 1 )); then
+    record PASS hpa "load drove hpa-web to ${replicas} replicas (target CPU 30%)"
+  else
+    record FAIL hpa "replicas stayed at ${replicas:-1} under load"
+  fi
+}
+
+check_preemption() {
+  log "12 — priority preemption (workload-high schedules under pressure)"
+  render "${SCRIPT_DIR}/10-preemption/filler.yaml" | kubectl apply -f -
+  # Let the filler saturate: at the pool maximum some replicas stay Pending by
+  # design — that is the pressure the high-tier pod must overcome.
+  sleep 45
+  render "${SCRIPT_DIR}/10-preemption/critical.yaml" | kubectl apply -f -
+  local ok=0
+  if kubectl -n "${NS}" wait --for=condition=Ready pod/critical-claim --timeout=300s >/dev/null 2>&1; then
+    ok=1
+  fi
+  local preempted
+  preempted="$(kubectl -n "${NS}" get events --field-selector reason=Preempted -o name 2>/dev/null | wc -l | tr -d ' ')"
+  kubectl -n "${NS}" delete deploy filler --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "${NS}" delete pod critical-claim --ignore-not-found >/dev/null 2>&1 || true
+  if (( ok )); then
+    record PASS preemption "workload-high pod scheduled under pressure (${preempted} Preempted event(s))"
+  else
+    record FAIL preemption "critical-claim did not schedule within 5 min"
+  fi
+}
+
+CREATED_BACKUP=""
+CREATED_RESTORE=""
+check_backup_restore() {
+  log "13 — backup -> delete -> restore (ADR-0004; runs LAST: the restore bounces the workload namespaces)"
+  if [[ -z "${BACKUP_PLAN}" || -z "${RESTORE_PLAN}" ]]; then
+    record SKIP backup-restore "backup/restore plan outputs not set"; return
+  fi
+  # A fresh marker on the encrypted volume is what must come back.
+  local marker stamp
+  stamp="$(date +%s)"
+  marker="backup-${stamp}"
+  if ! kubectl -n "${NS}" exec pvc-writer -- sh -c "echo '${marker}' > /data/marker" 2>/dev/null; then
+    record FAIL backup-restore "could not write the marker (is pvc-writer running?)"; return
+  fi
+  CREATED_BACKUP="val-${stamp}"
+  log "  creating on-demand backup ${CREATED_BACKUP} (waits for completion)..."
+  if ! gcloud backup-restore backups create "${CREATED_BACKUP}" --project "${PROJECT_ID}" \
+      --location "${LOCATION}" --backup-plan "${BACKUP_PLAN}" --wait-for-completion --quiet >/dev/null; then
+    record FAIL backup-restore "on-demand backup did not complete"; return
+  fi
+  log "  deleting namespace ${NS}..."
+  kubectl delete namespace "${NS}" --wait --timeout=300s >/dev/null
+  CREATED_RESTORE="val-${stamp}"
+  log "  restoring (waits for completion)..."
+  if ! gcloud backup-restore restores create "${CREATED_RESTORE}" --project "${PROJECT_ID}" \
+      --location "${LOCATION}" --restore-plan "${RESTORE_PLAN}" \
+      --backup "projects/${PROJECT_ID}/locations/${LOCATION}/backupPlans/${BACKUP_PLAN}/backups/${CREATED_BACKUP}" \
+      --wait-for-completion --quiet >/dev/null; then
+    record FAIL backup-restore "restore did not complete"; return
+  fi
+  if ! kubectl -n "${NS}" wait --for=condition=Ready pod/pvc-writer --timeout=300s >/dev/null 2>&1; then
+    record FAIL backup-restore "pvc-writer not Ready after the restore"; return
+  fi
+  local read_back
+  read_back="$(kubectl -n "${NS}" exec pvc-writer -- cat /data/marker 2>/dev/null || true)"
+  if [[ "${read_back}" == "${marker}" ]]; then
+    record PASS backup-restore "namespace deleted and restored; volume data intact ('${marker}')"
+  else
+    record FAIL backup-restore "marker not restored (got '${read_back}')"
   fi
 }
 
@@ -298,6 +554,10 @@ EOF
 # inside main() without re-fetching kubeconfig.
 do_cleanup() {
   log "Tearing down examples + WI scaffolding"
+  # Re-admit any node a failed run left cordoned (drain/zone-failover checks).
+  local cordoned n
+  cordoned="$(kubectl get nodes --field-selector spec.unschedulable=true -o name 2>/dev/null || true)"
+  for n in ${cordoned}; do kubectl uncordon "${n#node/}" >/dev/null 2>&1 || true; done
   kubectl delete namespace "${NS}" --ignore-not-found --wait=false
   # Ingress examples live in the platform namespaces — remove the objects, not
   # the namespaces (the cluster stack owns those).
@@ -306,6 +566,17 @@ do_cleanup() {
   kubectl -n internal-tools delete pod ingress-test --ignore-not-found 2>/dev/null || true
   gcloud iam service-accounts delete "${WI_GSA}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
   gcloud secrets delete "${SECRET_NAME}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
+  # On-demand validation backups must not outlive the run (#31 teardown
+  # hygiene): delete every val-* restore + backup, not just this run's.
+  if [[ -n "${BACKUP_PLAN:-}" ]]; then
+    local r b
+    for r in $(gcloud backup-restore restores list --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
+      gcloud backup-restore restores delete "${r}" --project "${PROJECT_ID}" --location "${LOCATION}"         --restore-plan "${RESTORE_PLAN}" --quiet 2>/dev/null || true
+    done
+    for b in $(gcloud backup-restore backups list --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --format='value(name)' 2>/dev/null | grep -o 'val-[0-9]*' || true); do
+      gcloud backup-restore backups delete "${b}" --project "${PROJECT_ID}" --location "${LOCATION}"         --backup-plan "${BACKUP_PLAN}" --quiet 2>/dev/null || true
+    done
+  fi
 }
 
 # --cleanup mode: just tear down (resolve + connect, then delete).
@@ -350,6 +621,13 @@ main() {
   check_workload_identity
   check_external_ingress
   check_internal_ingress
+  check_drain_survival
+  check_rolling_deploy
+  check_regional_pvc
+  check_node_autoscale
+  check_hpa
+  check_preemption
+  check_backup_restore
 
   if summary; then
     if (( auto_cleanup )); then

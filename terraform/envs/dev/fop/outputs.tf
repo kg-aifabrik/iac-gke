@@ -64,6 +64,17 @@ output "private_zone_dns_name" {
   value       = module.stack.private_zone_dns_name
 }
 
+# Comma-joined for validate.sh.
+output "external_hostnames" {
+  description = "External hostnames served by the public gateway."
+  value       = module.stack.external_hostnames
+}
+
+output "internal_hostnames" {
+  description = "Internal hostnames served by the private gateway."
+  value       = module.stack.internal_hostnames
+}
+
 # Used by the validation suite to trigger an on-demand backup and restore.
 output "backup_plan_name" {
   description = "Backup for GKE plan name."

@@ -66,6 +66,16 @@ output "cas_subordinate_pool" {
   value       = module.private_ca.subordinate_ca_pool_name
 }
 
+output "external_hostnames" {
+  description = "External hostnames, comma-joined for scripts (validate.sh)."
+  value       = join(",", var.external_hostnames)
+}
+
+output "internal_hostnames" {
+  description = "Internal hostnames, comma-joined for scripts (validate.sh)."
+  value       = join(",", var.internal_hostnames)
+}
+
 output "private_zone_dns_name" {
   description = "DNS name of the private zone resolving the internal hostnames inside the VPC."
   value       = module.dns.private_zone_dns_name

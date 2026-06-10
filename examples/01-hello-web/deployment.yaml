@@ -20,6 +20,9 @@ spec:
       labels:
         app: hello-web
     spec:
+      # Normal workloads run at the explicit default tier (platform scheduling
+      # tiers, design §5) — self-documenting, no implicit behavior change.
+      priorityClassName: workload-default
       securityContext:
         runAsNonRoot: true
         seccompProfile:

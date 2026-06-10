@@ -1,0 +1,15 @@
+# A volume on the REGIONAL CMEK-encrypted StorageClass (encrypted-regional-rwo,
+# ADR-0008): synchronously replicated across two zones, so the workload
+# survives a zone failure with its data. The validation drains the pod's zone
+# and asserts it reschedules into the surviving zone with the data intact.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: regional-data
+  namespace: examples
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: encrypted-regional-rwo
+  resources:
+    requests:
+      storage: 10Gi

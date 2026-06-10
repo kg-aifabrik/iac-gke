@@ -1,0 +1,40 @@
+# Priority/preemption validation (platform scheduling tiers, design §5).
+# The filler saturates cluster CPU at the default tier (more replicas than can
+# ever schedule — some stay Pending by design, even at the pool's max size).
+# A workload-high pod then arrives; the scheduler preempts a default-tier
+# filler to place it. The validation asserts the high-tier pod runs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filler
+  namespace: examples
+  labels:
+    app: filler
+spec:
+  replicas: 18
+  selector:
+    matchLabels:
+      app: filler
+  template:
+    metadata:
+      labels:
+        app: filler
+    spec:
+      priorityClassName: workload-default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pause
+          image: ${REGISTRY_PROXY}/library/busybox:1.36
+          command: ["sh", "-c", "sleep 3600"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 400m, memory: 32Mi }
+            limits: { cpu: 400m, memory: 64Mi }

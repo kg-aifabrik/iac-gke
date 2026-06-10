@@ -1,8 +1,8 @@
 # Internal ingress example — hello-web exposed on the internal gateway over
-# HTTPS. Lives in the internal-tools namespace (labelled ingress=internal), so
-# its HTTPRoute attaches to the platform internal gateway. Served with a
-# CAS-issued cert (private trust) at hello.internal.dev.arthos.app, reachable
-# only inside the VPC.
+# HTTPS, serving BOTH internal hostnames (multi-SAN CAS cert, ADR-0005). Lives
+# in the internal-tools namespace (labelled ingress=internal). The hostnames
+# resolve through the Cloud DNS private zone (ADR-0006) — clients use names,
+# never the VIP — and the validation verifies the cert against the CAS root.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -29,10 +29,18 @@ spec:
       labels:
         app: hello-web
     spec:
+      priorityClassName: workload-default
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: hello-web
       containers:
         - name: web
           image: ${REGISTRY_PROXY}/nginxinc/nginx-unprivileged:1.27-alpine
@@ -47,6 +55,10 @@ spec:
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 100m, memory: 64Mi }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
           volumeMounts:
             - { name: html, mountPath: /usr/share/nginx/html, readOnly: true }
             - { name: tmp, mountPath: /tmp }
@@ -57,6 +69,17 @@ spec:
         - { name: tmp, emptyDir: {} }
         - { name: cache, emptyDir: {} }
         - { name: run, emptyDir: {} }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hello-web
+  namespace: internal-tools
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hello-web
 ---
 apiVersion: v1
 kind: Service
@@ -81,7 +104,8 @@ spec:
       namespace: gateway-system
       sectionName: https
   hostnames:
-    - hello.internal.dev.arthos.app
+    - ${INTERNAL_HOST_1}
+    - ${INTERNAL_HOST_2}
   rules:
     - backendRefs:
         - name: hello-web

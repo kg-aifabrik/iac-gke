@@ -1,0 +1,46 @@
+# Mounts the regional volume through a Deployment (1 replica — RWO volume), so
+# the pod is rescheduled automatically when its node/zone is drained; the
+# regional disk reattaches in the surviving replica zone.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: regional-writer
+  namespace: examples
+  labels:
+    app: regional-writer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: regional-writer
+  template:
+    metadata:
+      labels:
+        app: regional-writer
+    spec:
+      priorityClassName: workload-default
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: ${REGISTRY_PROXY}/library/busybox:1.36
+          command: ["sh", "-c", "echo ready; sleep 3600"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 50m, memory: 32Mi }
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: regional-data

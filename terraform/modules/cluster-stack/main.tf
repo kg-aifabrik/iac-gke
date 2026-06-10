@@ -240,7 +240,10 @@ module "backup" {
   schedule    = var.backup_schedule
   retain_days = var.backup_retain_days
   kms_key_id  = var.kms_key_id
-  labels      = local.labels
+  # The two workload namespaces plus the validation namespace; platform
+  # namespaces are deliberately excluded (see the gke-backup module).
+  restore_namespaces = [var.external_namespace, var.internal_namespace, "examples"]
+  labels             = local.labels
 }
 
 # Private CA (CAS) for internal-endpoint TLS, plus the cert-manager identity.

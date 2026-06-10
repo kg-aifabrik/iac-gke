@@ -1,0 +1,29 @@
+# The production-tier claimant: must schedule under pressure, preempting a
+# default-tier filler if no capacity is free.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: critical-claim
+  namespace: examples
+  labels:
+    app: critical-claim
+spec:
+  priorityClassName: workload-high
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: ${REGISTRY_PROXY}/library/busybox:1.36
+      command: ["sh", "-c", "echo scheduled; sleep 3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests: { cpu: 400m, memory: 32Mi }
+        limits: { cpu: 400m, memory: 64Mi }
