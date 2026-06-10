@@ -18,7 +18,8 @@ This is the repository whose GitHub Actions automation is trusted to reach Googl
 | **M0** — Verified keyless access | WIF + service-account impersonation + `setup-doctor` + a CI demo | ✅ closed |
 | **M1** — Cluster factory | a hardened, private, regional cluster as `account × environment × purpose` configuration | ✅ closed |
 | **M2** — Ingress and TLS | two gateways (internal + external), public + private (CAS) certificates, a baseline web application firewall | ✅ closed |
-| **M3** — Security hardening | image supply chain / Binary Authorization enforce, posture, namespace stamps, mTLS | 🔭 planned (#17) |
+| **M3** — High availability | node autoscaling, Backup for GKE + restore, regional-PD storage, multi-host ingress + Cloud DNS, scheduling tiers — validated 13/13 on a live cluster | ✅ built & validated (milestone open for one cold-start check, #46) |
+| **M4** — Security hardening | image supply chain / Binary Authorization enforce, posture, namespace stamps, mTLS | 🔭 planned (#17) |
 
 Each milestone was built through the gated pipeline and proven against a real dev cluster, then
 torn down. Delivery, bring-up issues, and decisions for each are recorded in a per-milestone
