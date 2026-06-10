@@ -34,6 +34,10 @@ readonly KSA="wi-demo"
 readonly SECRET_NAME="${SECRET_NAME:-cluster-ctrl-example}"
 readonly SECRET_VALUE="hello-from-secret-manager"
 export USE_GKE_GCLOUD_AUTH_PLUGIN="True"
+# Non-interactive: the backup/restore calls use `gcloud beta`, whose one-time
+# component install otherwise prompts "Continue (Y/n)?" and hangs an
+# unattended run. This disables every gcloud prompt (auto-installs instead).
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1
 
 # --- helpers ---------------------------------------------------------------
 
