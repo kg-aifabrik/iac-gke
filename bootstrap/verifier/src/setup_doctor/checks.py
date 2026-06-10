@@ -492,13 +492,35 @@ def check_cas_cas_enabled(privateca: Any, config: Config) -> CheckResult:
             "environment not set (SETUP_DOCTOR_ENVIRONMENT)",
             required=False,
         )
-    cas_api = privateca.projects().locations().caPools().certificateAuthorities()
-    not_enabled: list[str] = []
+    # The pools carry a per-generation random suffix (<env>-cas-<rand>-root /
+    # -subordinate), so discover them by prefix rather than an exact name.
+    pools_api = privateca.projects().locations().caPools()
+    parent = f"{config.project_ref}/locations/{config.region}"
+    prefix = f"{config.environment}-cas-"
     try:
-        for tier in ("root", "subordinate"):
-            ca = cas_api.get(name=config.cas_ca_resource(tier)).execute(num_retries=3)
-            if ca.get("state") != "ENABLED":
-                not_enabled.append(f"{config.environment}-cas-{tier}")
+        resp = pools_api.list(parent=parent).execute(num_retries=3)
+        matched: dict[str, str] = {}  # "root"/"subordinate" -> pool full name
+        for pool in resp.get("caPools", []):
+            short = pool["name"].rsplit("/", 1)[-1]
+            if not short.startswith(prefix):
+                continue
+            for role in ("root", "subordinate"):
+                if short.endswith(f"-{role}"):
+                    matched[role] = pool["name"]
+        missing = [r for r in ("root", "subordinate") if r not in matched]
+        if missing:
+            return CheckResult(
+                name,
+                Status.FAIL,
+                f"no {', '.join(missing)} CA pool matching {prefix}*",
+                remediation="apply the fop root (private-ca module) to create the CAS hierarchy",
+            )
+        not_enabled: list[str] = []
+        for role, pool_name in matched.items():
+            cas = pools_api.certificateAuthorities().list(parent=pool_name).execute(num_retries=3)
+            states = [ca.get("state") for ca in cas.get("certificateAuthorities", [])]
+            if "ENABLED" not in states:
+                not_enabled.append(f"{role} ({states or 'no CA'})")
     except HttpError as error:
         status = _http_status(error)
         if status == 403:
@@ -507,13 +529,6 @@ def check_cas_cas_enabled(privateca: Any, config: Config) -> CheckResult:
                 Status.SKIP,
                 "insufficient permission to read CAS; run locally as an operator",
                 required=False,
-            )
-        if status == 404:
-            return CheckResult(
-                name,
-                Status.FAIL,
-                "CAS certificate authority not found",
-                remediation="apply the private-ca module (the fop root) to create the CAs",
             )
         return CheckResult(name, Status.FAIL, f"error reading CAS (HTTP {status})")
 

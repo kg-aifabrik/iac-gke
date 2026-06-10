@@ -132,8 +132,8 @@ examples/validate.sh --cleanup   # 🧑 first: remove the throwaway WI scaffoldi
 gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop   # then destroy the cluster
 # Approve in 'dev'. The destroy workflow deletes the in-cluster Gateways first, so the GKE
 # Gateway controller releases its load balancers before Terraform removes the edge resources
-# (#31). The CAS hierarchy is foundation-owned and is NOT touched by a fop destroy — deleted
-# CaPool ids are retired forever, so the CA persists across rebuilds (ADR-0002 amendment).
+# (#31). The CAS hierarchy is per-cluster with random-suffixed names, so this destroy removes
+# it and the next apply regenerates fresh ids (no burned-id or soft-deleted-SA collision).
 # foundation is normally left in place; if torn down, the KMS key ring/key REMAIN (Cloud KMS
 # forbids deletion) and are reused on the next apply.
 ```
@@ -141,4 +141,4 @@ gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop   # then destro
 After teardown, remove the ingress DNS records you added — the external A record now points to a
 released IP and the DNS-authorization CNAME is moot.
 
-Cost while up: 3–6 × `e2-medium` (autoscaling), two load balancers, backups — short-lived. The CAS pools persist in the foundation (standing, accepted).
+Cost while up: 3–6 × `e2-medium` (autoscaling), two load balancers, backups, the DEVOPS CAS pair — all short-lived. **A `fop` teardown leaves zero billable resources**; only the free/undeletable foundation singletons remain (enabled APIs, node SA, the KMS key shell).

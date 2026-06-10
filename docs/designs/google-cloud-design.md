@@ -321,10 +321,11 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   logs**, so public certificates do not apply to them; the private CA's cost and trust
   distribution are provided for below.
   - **Hierarchy** — a long-lived **root** CA kept cold, with **per-environment subordinate** CAs
-    issuing the leaf certificates. The hierarchy is **foundation-owned** — it outlives cluster
-    rebuilds (distributed trust must not churn) and Google permanently retires deleted CaPool
-    ids, so the pools (`<env>-cas-root`, `<env>-cas-subordinate`) persist like the KMS key
-    (ADR-0002, amended).
+    issuing the leaf certificates. In dev the hierarchy is **per-cluster** (created by
+    `cluster-stack`, torn down with the cluster) with **random-suffixed** pool/CA/service-account
+    names (`<env>-cas-<rand>-*`) so each rebuild is collision-free — a deleted CaPool id and a
+    soft-deleted service-account id are never reused. Stage/prod may instead instantiate it from
+    their foundation root for a durable, MDM-distributed root (ADR-0002, amendment 3).
   - **Issuance** — **cert-manager** with the **`google-cas-issuer`** requests a leaf from CAS,
     writes it to a Secret, and the gateway references it (`tls.certificateRefs`). Leaves
     auto-rotate.

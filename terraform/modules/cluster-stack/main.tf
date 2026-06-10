@@ -97,13 +97,13 @@ locals {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata   = { name = "cas-root-ca", namespace = "cert-manager" }
-    data       = { "ca.crt" = var.cas_root_ca_pem }
+    data       = { "ca.crt" = join("", module.private_ca.root_ca_pem) }
   })
   cas_cluster_issuer = yamlencode({
     apiVersion = "cas-issuer.jetstack.io/v1beta1"
     kind       = "GoogleCASClusterIssuer"
     metadata   = { name = "cas-issuer" }
-    spec       = { project = var.project_id, location = var.region, caPoolId = var.cas_subordinate_pool_name }
+    spec       = { project = var.project_id, location = var.region, caPoolId = module.private_ca.subordinate_ca_pool_name }
   })
   trust_bundle = yamlencode({
     apiVersion = "trust.cert-manager.io/v1alpha1"
@@ -197,6 +197,21 @@ module "cluster" {
   enable_confidential_pool  = var.enable_confidential_pool
   confidential_machine_type = var.confidential_machine_type
   confidential_node_count   = var.confidential_node_count
+}
+
+# Private CA (CAS) for internal-endpoint TLS — instantiated PER CLUSTER so a
+# teardown removes it (ADR-0002 amendment 3). Random-suffixed names make
+# rebuilds collision-free; DEVOPS tier in dev keeps the standing cost trivial.
+module "private_ca" {
+  source = "../private-ca"
+
+  project_id          = var.project_id
+  region              = var.region
+  environment         = var.environment
+  workload_pool       = module.cluster.workload_pool
+  cas_tier            = var.cas_tier
+  deletion_protection = var.deletion_protection
+  labels              = local.labels
 }
 
 module "access" {

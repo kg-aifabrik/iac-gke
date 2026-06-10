@@ -173,13 +173,31 @@ class FakeKms:
         return self._ck
 
 
-class FakePrivateCa:
-    """Fakes the CAS certificate-authority get. ``states`` maps a CA id to its state."""
+class _CertAuthoritiesNs:
+    """Fakes caPools().certificateAuthorities().list(parent=<pool>)."""
 
-    def __init__(
-        self, states: dict[str, str] | None = None, error: HttpError | None = None
-    ) -> None:
-        self._states = states or {}
+    def __init__(self, pool_states: dict[str, str]) -> None:
+        # pool short name -> the state of its (single) CA.
+        self._pool_states = pool_states
+
+    def list(self, parent: str) -> _Request:
+        pool = parent.rsplit("/", 1)[-1]
+        return _Request(result={"certificateAuthorities": [{"state": self._pool_states[pool]}]})
+
+
+class FakePrivateCa:
+    """Fakes the CAS caPools().list() + certificateAuthorities().list() surface.
+
+    ``pools`` maps a pool short name to its CA state (default: a random-suffixed
+    root + subordinate, both ENABLED). ``error`` makes the pool list raise.
+    """
+
+    def __init__(self, pools: dict[str, str] | None = None, error: HttpError | None = None) -> None:
+        self._pools = (
+            pools
+            if pools is not None
+            else {"dev-cas-ab12c-root": "ENABLED", "dev-cas-ab12c-subordinate": "ENABLED"}
+        )
         self._error = error
 
     def projects(self) -> FakePrivateCa:
@@ -191,12 +209,12 @@ class FakePrivateCa:
     def caPools(self) -> FakePrivateCa:  # noqa: N802 - matches API method name
         return self
 
-    def certificateAuthorities(self) -> FakePrivateCa:  # noqa: N802 - matches API method name
-        return self
+    def list(self, parent: str) -> _Request:
+        pools = [{"name": f"{parent}/caPools/{n}"} for n in self._pools]
+        return _Request(result={"caPools": pools}, error=self._error)
 
-    def get(self, name: str) -> _Request:
-        ca = name.split("/certificateAuthorities/")[-1]
-        return _Request(result={"state": self._states.get(ca, "ENABLED")}, error=self._error)
+    def certificateAuthorities(self) -> _CertAuthoritiesNs:  # noqa: N802 - matches API name
+        return _CertAuthoritiesNs(self._pools)
 
 
 class _CertificatesNs:

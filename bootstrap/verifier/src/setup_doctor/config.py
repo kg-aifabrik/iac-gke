@@ -180,18 +180,6 @@ class Config:
             f"/keyRings/gke-{self.region}/cryptoKeys/{self.kms_key_name}"
         )
 
-    def cas_ca_resource(self, tier: str) -> str:
-        """Full resource name of a CAS certificate authority (tier = root | subordinate).
-
-        The private-ca module names both the pool and the CA ``<env>-cas-<tier>``
-        (the "-ca-" infix exists because Google permanently retires deleted
-        CaPool ids — the original ``<env>-<tier>`` names are burned).
-        """
-        ca = f"{self.environment}-cas-{tier}"
-        return (
-            f"{self.project_ref}/locations/{self.region}/caPools/{ca}/certificateAuthorities/{ca}"
-        )
-
     def external_certificate_resource(self, hostname: str) -> str:
         """Full resource name of a hostname's managed certificate (global, ADR-0005)."""
         return (

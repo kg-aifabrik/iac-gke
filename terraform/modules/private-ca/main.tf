@@ -3,25 +3,32 @@
 # cert-manager (google-cas-issuer) issues leaf certs from the subordinate pool.
 # Internal hostnames never enter public Certificate Transparency logs.
 #
-# Lifetime: instantiated from the per-project FOUNDATION root (like the KMS
-# key), not the per-cluster roots — the root CA must outlive cluster rebuilds
-# (MDM-distributed trust breaks if it churns), and Google permanently RETIRES
-# a deleted CaPool id. Burned ids so far: dev-root/dev-subordinate (M2 teardown)
-# and dev-ca-root/dev-ca-subordinate (deleted when dev moved from the ENTERPRISE
-# to the DEVOPS tier — tier is immutable on a pool, so the switch replaces it).
-# The "-cas-" infix is the current, fresh generation; if ever burned again, bump
-# it (cas -> cas2 ...). Because CAS now PERSISTS in the foundation it should not
-# churn, so one fresh name suffices.
+# Lifetime: instantiated from the per-cluster scope (cluster-stack), so a `fop`
+# teardown removes every billable CAS resource — dev leaves nothing standing.
+# Two Google lifecycle traps make a fixed name unsafe across rebuilds: a deleted
+# CaPool id is RETIRED FOREVER, and a deleted service account soft-reserves its
+# id for ~30 days. So the pool/CA/SA names carry a per-generation RANDOM SUFFIX
+# (random_string.suffix): destroyed with the cluster, regenerated fresh on the
+# next apply — collision-free every cycle, no manual name bumps.
 #
 # Tier: DEVOPS for dev (~10x cheaper; no revocation/CRL, fine for short-lived
-# auto-rotated internal leaves) — set on the dev foundation. Stage/prod keep the
-# ENTERPRISE default. The premium tier left standing was this milestone's
-# headline cost (see the retrospective).
+# auto-rotated internal leaves). Stage/prod keep the ENTERPRISE default; if they
+# want a durable CA they can instantiate this module from their foundation root
+# instead. The ENTERPRISE tier left standing was Milestone 3's headline cost.
 #
 # Terraform owns the Google resources (this module). The cert-manager add-on and
 # the trust-manager bundle that distributes the root are in-cluster manifests.
 
+resource "random_string" "suffix" {
+  length  = 5
+  upper   = false
+  special = false
+}
+
 locals {
+  # Per-generation base name, e.g. "dev-cas-a1b2c". Fresh every create cycle.
+  cas = "${var.environment}-cas-${random_string.suffix.result}"
+
   # Shared CA certificate config (a signing CA: cert_sign + crl_sign).
   ca_x509 = {
     is_ca     = true
@@ -34,7 +41,7 @@ locals {
 
 resource "google_privateca_ca_pool" "root" {
   project  = var.project_id
-  name     = "${var.environment}-cas-root"
+  name     = "${local.cas}-root"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -44,7 +51,7 @@ resource "google_privateca_certificate_authority" "root" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.root.name
-  certificate_authority_id = "${var.environment}-cas-root"
+  certificate_authority_id = "${local.cas}-root"
   type                     = "SELF_SIGNED"
   lifetime                 = var.root_ca_lifetime
   labels                   = var.labels
@@ -88,7 +95,7 @@ resource "google_privateca_certificate_authority" "root" {
 
 resource "google_privateca_ca_pool" "subordinate" {
   project  = var.project_id
-  name     = "${var.environment}-cas-subordinate"
+  name     = "${local.cas}-subordinate"
   location = var.region
   tier     = var.cas_tier
   labels   = var.labels
@@ -98,7 +105,7 @@ resource "google_privateca_certificate_authority" "subordinate" {
   project                  = var.project_id
   location                 = var.region
   pool                     = google_privateca_ca_pool.subordinate.name
-  certificate_authority_id = "${var.environment}-cas-subordinate"
+  certificate_authority_id = "${local.cas}-subordinate"
   type                     = "SUBORDINATE"
   lifetime                 = var.subordinate_ca_lifetime
   labels                   = var.labels
@@ -145,7 +152,7 @@ resource "google_privateca_certificate_authority" "subordinate" {
 # The Google service account google-cas-issuer impersonates to request leaves.
 resource "google_service_account" "cert_manager" {
   project      = var.project_id
-  account_id   = var.cert_manager_gsa_id
+  account_id   = "${var.cert_manager_gsa_id}-${random_string.suffix.result}"
   display_name = "cert-manager CAS issuer (${var.environment})"
 }
 

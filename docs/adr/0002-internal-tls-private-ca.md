@@ -73,5 +73,24 @@ auto-rotated internal leaves; it lacks certificate-revocation/CRL and issued-cer
 which dev does not need. Stage/prod keep ENTERPRISE (revocation matters there).
 
 Switching tier replaces the pool (``tier`` is immutable), which deletes — and therefore
-burns — the ``<env>-ca-*`` ids; the current generation is ``<env>-cas-*``. Since CAS now
-persists in the foundation it should not churn again, so one fresh generation suffices.
+burns — the ``<env>-ca-*`` ids; the next generation is ``<env>-cas-*``.
+
+## Amendment 3 (2026-06-10, ephemeral-dev requirement) — supersedes the location of Amendment 1
+
+**Dev must leave zero billable resources on teardown**, so the CAS hierarchy moved back out
+of the foundation into the **per-cluster scope** (`cluster-stack`): a `fop` destroy now
+removes it. Amendment 1 had parked CAS in the foundation to dodge two Google lifecycle
+traps — but the real fix is a **per-generation random suffix** on the pool/CA/service-account
+names (`<env>-cas-<rand>-*`, `cert-manager-cas-<rand>`): destroyed with the cluster,
+regenerated on the next apply, so a deleted CaPool id or a soft-deleted service-account id
+is never reused. This is collision-free across rebuilds *and* leaves nothing standing.
+
+- **MDM browser-trust durability** (Amendment 1's other reason) does not apply to dev (test
+  traffic), so a per-cluster, regenerated dev root is fine.
+- **Stage/prod**, if they want a durable root for MDM-distributed trust, can instantiate the
+  same module from their *foundation* root and keep the `ENTERPRISE` tier — the module works
+  in either scope. That is a per-environment choice, not a code fork.
+
+Net: dev teardown leaves only the free/undeletable foundation singletons (enabled APIs, the
+node service account, the KMS key shell). The standing-pool cost that Amendment 1 accepted is
+eliminated for dev.

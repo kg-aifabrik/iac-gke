@@ -377,15 +377,20 @@ def test_cas_cas_enabled_passes(cluster_config):
 
 
 def test_cas_subordinate_disabled_fails(cluster_config):
-    pca = FakePrivateCa(states={"dev-cas-subordinate": "DISABLED"})
+    pca = FakePrivateCa(
+        pools={"dev-cas-ab12c-root": "ENABLED", "dev-cas-ab12c-subordinate": "DISABLED"}
+    )
     result = checks.check_cas_cas_enabled(pca, cluster_config)
     assert result.status is Status.FAIL
-    assert "dev-cas-subordinate" in result.detail
+    assert "subordinate" in result.detail
 
 
-def test_cas_not_found_fails(cluster_config):
-    result = checks.check_cas_cas_enabled(FakePrivateCa(error=http_error(404)), cluster_config)
+def test_cas_pool_missing_fails(cluster_config):
+    # Only a root pool present — the subordinate is absent.
+    pca = FakePrivateCa(pools={"dev-cas-ab12c-root": "ENABLED"})
+    result = checks.check_cas_cas_enabled(pca, cluster_config)
     assert result.status is Status.FAIL
+    assert "subordinate" in result.detail
 
 
 def test_cas_permission_denied_skips(cluster_config):

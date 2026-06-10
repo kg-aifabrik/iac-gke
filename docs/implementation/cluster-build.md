@@ -188,11 +188,12 @@ resources during a build.
 
 Internal endpoints get TLS from a private certificate authority, so their hostnames never
 appear in public Certificate Transparency logs (ADR-0002). Certificate Authority Service (CAS)
-holds the hierarchy — **instantiated from the foundation root, not the cluster roots**: the
-root CA outlives cluster rebuilds (MDM-distributed trust must not churn), and Google
-permanently retires a deleted CaPool id (the original `dev-root`/`dev-subordinate` names are
-burned — hence pools named `<env>-cas-root`/`<env>-cas-subordinate`). A `fop` destroy never
-touches CAS; like the KMS key, it persists (ADR-0002 amendment):
+holds the hierarchy — in dev it is **per-cluster** (created by `cluster-stack`, removed by a
+`fop` teardown so nothing bills while dev is idle). The pool, CA, and service-account names
+carry a **per-generation random suffix** (`<env>-cas-<rand>-*`, `cert-manager-cas-<rand>`):
+destroyed with the cluster and regenerated on the next apply, so a retired CaPool id or a
+soft-deleted service-account id is never reused (ADR-0002 amendment 3). Stage/prod can host it
+in their foundation for a durable MDM root:
 
 - **Root + subordinate** — a self-signed root (10-year, kept cold) signs a per-environment
   subordinate (5-year) that issues the leaf certificates; **DEVOPS** tier in dev (~10x cheaper; stage/prod use `ENTERPRISE`), RSA-4096.
