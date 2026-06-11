@@ -28,8 +28,9 @@ resource "google_container_cluster" "this" {
   network    = var.network
   subnetwork = var.subnetwork
 
-  # VPC-native (alias IP) + Dataplane V2 (Cilium/eBPF). Default-deny network
-  # policy is applied as in-cluster manifests, not a cluster field.
+  # VPC-native (alias IP) + Dataplane V2 (Cilium/eBPF). The per-namespace
+  # default-deny network policy arrives with the namespace stamps (security
+  # milestone, #17) as in-cluster manifests, not a cluster field.
   networking_mode   = "VPC_NATIVE"
   datapath_provider = "ADVANCED_DATAPATH"
   ip_allocation_policy {

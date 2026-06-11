@@ -114,15 +114,17 @@ Compute also creates the Google-managed service agents (below).
 - Private nodes have no public address, so a pod that needs the public internet egresses
   through **Cloud NAT** (a managed network-address-translation service on a Cloud Router),
   which gives shared outbound IPs. Without Cloud NAT, pods can reach only Google services.
-- It's **off by default** (least exposure) and added only when a workload needs it. Egress is
-  also gated by the namespace's default-deny network policy, so a pod needs *both* the Cloud
-  NAT path *and* an explicit egress allow.
+- It's **off by default** (least exposure) and added only when a workload needs it. Once the
+  namespace stamps land (security milestone, #17), egress will also be gated by each
+  namespace's default-deny network policy, so a pod will need *both* the Cloud NAT path *and*
+  an explicit egress allow.
 
 ### Dataplane V2 (Cilium)
 - The cluster's data plane is **Dataplane V2**, Google's managed networking built on
   **Cilium / eBPF** (extended Berkeley Packet Filter — programmable in the Linux kernel). It
   enforces NetworkPolicy in the kernel and powers network flow logging.
-- It is paired with a **default-deny** network policy in every namespace.
+- The per-namespace **default-deny** network policy it will enforce arrives with the namespace
+  stamps (security milestone, #17).
 
 ---
 
@@ -157,8 +159,9 @@ Compute also creates the Google-managed service agents (below).
 
 ### Hardening, built in
 - Verified-boot ("shielded") nodes, **Container-Optimized OS (COS)** nodes (minimal,
-  auto-patched), secret encryption with our key, Workload Identity, and Dataplane V2
-  default-deny — together clearing the **Center for Internet Security (CIS) Level 2** floor.
+  auto-patched), secret encryption with our key, Workload Identity, and Dataplane V2 (whose
+  per-namespace default-deny policy lands with the namespace stamps, #17) — together clearing
+  the **Center for Internet Security (CIS) Level 2** floor.
 
 ### Logging and metrics
 - **Logs** — system and workload logs flow to **Cloud Logging**.
@@ -415,7 +418,7 @@ capture Kubernetes state *and* volume data together.
 - **Least-privilege node identity + Workload Identity** — nodes can do little; pods get scoped identities, not node keys.
 - **Custom VPC, generous immutable Pod/Service ranges** — deliberate, non-overlapping addressing planned once.
 - **Regional everywhere; upgrades by environment** — dev auto-upgrades on a release channel; staging and production upgrade deliberately via scheduled Day-2 operations, validated on a test cluster first.
-- **Dataplane V2 default-deny, CIS Level 2** — secure by default.
+- **Dataplane V2, CIS Level 2** — secure by default; the per-namespace default-deny policy arrives with the namespace stamps (#17).
 - **Images only from our registry; Binary Authorization audit → enforce** — no untrusted images.
 - **Two gateways per cluster (internal + external)** — one per exposure class, shared across workload namespaces via HTTPRoute attachment and cross-namespace grants; Terraform-owned policies keep their security baseline uniform.
 - **Public certs for external, private CAS for internal** — internal hostnames stay out of public Certificate Transparency; trust is distributed by MDM (browsers) and trust-manager (services).

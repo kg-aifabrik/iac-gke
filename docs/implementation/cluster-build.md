@@ -71,9 +71,10 @@ the Milestone 0 check isn't tripped before the roles actually change.
 - **Private Google Access** — on the subnet, so private nodes (no external IP) reach Google
   APIs and Artifact Registry over Google's internal path — no NAT needed for Google services.
 - **Cloud NAT** — optional (`enable_cloud_nat`, default off); only for workloads needing the
-  public internet. Egress is also gated by the namespace default-deny network policy. (Dev
-  currently turns it on so the in-cluster TLS controllers can pull their images from quay.io
-  until those are mirrored through Artifact Registry — issue #27.)
+  public internet. The namespace stamps (security milestone, #17) will additionally gate egress
+  with a per-namespace default-deny network policy. (Dev currently turns Cloud NAT on so the
+  in-cluster TLS controllers can pull their images from quay.io until those are mirrored
+  through Artifact Registry — issue #27.)
 - **Proxy-only subnet** — a regional `REGIONAL_MANAGED_PROXY` subnet (`enable_proxy_only_subnet`),
   required by the internal regional Application Load Balancer (the internal gateway) for its
   managed Envoy proxies. Created only when a cluster fronts an internal gateway.
@@ -92,8 +93,8 @@ sizing/options are inputs (per environment, per purpose).
 - **Private, no public endpoint** — private nodes; the control plane uses the **DNS-based
   endpoint** with external access off. (DNS-endpoint availability is confirmed on the target
   GKE version at build — design open item.)
-- **VPC-native + Dataplane V2** — `ADVANCED_DATAPATH` (Cilium); default-deny is applied as
-  in-cluster manifests.
+- **VPC-native + Dataplane V2** — `ADVANCED_DATAPATH` (Cilium); the per-namespace default-deny
+  policy it will enforce arrives with the namespace stamps (security milestone, #17).
 - **Hardening** — shielded nodes, Container-Optimized OS, Workload Identity (pool + per-node
   `GKE_METADATA`), secret encryption with our key, node/disk encryption (`boot_disk_kms_key`).
 - **Admission** — Binary Authorization opts into the project policy (audit first, then enforce).
@@ -168,7 +169,7 @@ is a known footgun. So Terraform manages only Google Cloud resources (clean plan
 module **renders the `ClusterRoleBinding` as a YAML output** from the same identity list it
 uses for the IAM grants (one source of truth). The pipeline writes that output to a file and
 `kubectl apply`s it over the gateway after the cluster is up. Every in-cluster object
-(this binding, the default-deny network policy, the examples) follows the same
+(this binding, the platform manifests, the examples) follows the same
 Terraform-for-Google, kubectl-for-in-cluster split.
 
 **How an operator connects:**
