@@ -44,6 +44,7 @@ its data again.
 - **Good:** one backup covers objects + data; restores are namespace-scoped and repeatable;
   no self-run backup infrastructure; encrypted with our key.
 - **Bad:** backups can outlive the cluster (the point, but a teardown liability) — dev uses
-  short retention, validation deletes the backups it creates, and the destroy path purges
-  remaining backups before the plan, so `terraform destroy` stays clean (issue #31 lesson).
+  short retention and validation deletes the backups it creates (issue #31 lesson). The
+  destroy-path purge of remaining (e.g. scheduled) backups is tracked in issue #47; until it
+  lands, a plan still holding backups blocks `terraform destroy`.
 - **Bad:** per-GB backup storage cost — negligible at dev scale, priced per environment later.

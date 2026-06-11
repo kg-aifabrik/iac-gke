@@ -268,9 +268,10 @@ Stateful workloads are recoverable from deletion, corruption, and operator error
   delete-and-restore, volumes from backup data, cluster-scoped resources untouched (they
   belong to the platform). An on-demand restore is an operator/automation action against it
   (`gcloud backup-restore restores create`).
-- **Teardown discipline (#31)** — backups can outlive the cluster by design, so the
-  validation deletes the backups it creates and the destroy path purges any remaining before
-  the plan. The automation holds `roles/gkebackup.admin` (15th build role).
+- **Teardown discipline (#31)** — backups can outlive the cluster by design; the validation
+  deletes the backups it creates. A destroy-path purge of any remaining (e.g. scheduled)
+  backups — without which a plan still holding backups blocks `terraform destroy` — is future
+  work (#47). The automation holds `roles/gkebackup.admin` (15th build role).
 
 ## The factory — `modules/cluster-stack` + `envs/`
 

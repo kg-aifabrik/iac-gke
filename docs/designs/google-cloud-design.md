@@ -389,10 +389,11 @@ capture Kubernetes state *and* volume data together.
   operator/automation action against it. The validation suite proves the round-trip: write →
   back up → delete the namespace → restore → the workload serves its data again.
 - **Backups can outlive the cluster deliberately** (that is the disaster-recovery property),
-  so a clean dev teardown **deletes backups explicitly**: short retention in dev, validation
-  cleans up the backups it creates, and the destroy path removes any remaining ones before
-  deleting the plan — leaving no orphaned billable storage (the teardown-hygiene lesson of
-  issue #31).
+  so a clean dev teardown **deletes backups explicitly**: retention is short in dev and the
+  validation suite cleans up the backups it creates (the teardown-hygiene lesson of issue
+  #31). A destroy-path purge of any *remaining* backups — scheduled ones accrue on a cluster
+  alive past the daily cron, and a plan still holding backups cannot be deleted — is future
+  work (issue #47).
 
 ## 10. Build order
 
@@ -448,8 +449,8 @@ CAS root). Still open:
   forward-compatible design is captured in §8.
 - **Confirm at the high-availability build:** the `autoscaling_profile` applies with node
   auto-provisioning disabled; regional `pd-balanced` minimum size and CMEK behave as expected;
-  deleting a backup plan that has held backups destroys cleanly (else the destroy path purges
-  backups first); the preemption validation accounts for the autoscaler adding a node before
+  deleting a backup plan that has held backups destroys cleanly (not exercised at the M3
+  teardown — no backups remained; the destroy-path purge is issue #47); the preemption validation accounts for the autoscaler adding a node before
   preemption fires.
 
 ## 13. Related
