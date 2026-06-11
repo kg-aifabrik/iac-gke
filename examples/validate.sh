@@ -472,9 +472,9 @@ check_node_autoscale() {
   # node — so node GROWTH cannot be asserted again; capacity proof suffices.
   if (( nodes_before >= ${MAX_NODES:-6} )); then at_ceiling=1; fi
   render "${SCRIPT_DIR}/08-autoscale/deployment.yaml" | kubectl apply -f -
-  # 3 x 500m: enough that the baseline nodes can't hold them (each fresh
-  # e2-medium fits ~one 500m pod after DaemonSet overhead), small enough to be
-  # reachable inside the pool's 2-per-zone ceiling.
+  # 3 x 350m: enough that the baseline nodes can't hold them, small enough
+  # that the autoscaler's simulation fits one on a fresh e2-medium after
+  # DaemonSet overhead (500m proved marginal — see 08-autoscale/deployment.yaml).
   kubectl -n "${NS}" scale deploy/capacity-demand --replicas=3 >/dev/null
   # Scale-out: CA reacts to the pending pods in ~1 min; a node boots in ~2 min.
   log "  waiting for the autoscaler to add capacity (up to ~8 min)..."

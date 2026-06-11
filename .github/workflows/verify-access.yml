@@ -70,8 +70,8 @@ jobs:
           # — owner, not editor, because *.delete is needed for a clean teardown,
           # #31 — and gkebackup.admin for M3 backup plans, ADR-0004). The two
           # Connect Gateway roles the access module grants are added back here
-          # once the fop build re-applies (dev was torn down after M2, so they
-          # are not present yet). storage.objectAdmin is bucket-scoped.
+          # only while a fop build stands (dev is torn down between milestones,
+          # so they are absent right now). storage.objectAdmin is bucket-scoped.
           SETUP_DOCTOR_EXPECTED_ROLES: roles/serviceusage.serviceUsageAdmin,roles/compute.networkAdmin,roles/compute.securityAdmin,roles/dns.admin,roles/container.admin,roles/cloudkms.admin,roles/iam.serviceAccountAdmin,roles/iam.serviceAccountUser,roles/resourcemanager.projectIamAdmin,roles/artifactregistry.admin,roles/binaryauthorization.policyEditor,roles/gkehub.admin,roles/privateca.admin,roles/certificatemanager.owner,roles/gkebackup.admin
         # In CI the automation SA is least-privilege, so the operator-only
         # structural checks (WIF provider, SA roles) report SKIP; the identity

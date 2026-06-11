@@ -134,7 +134,9 @@ jobs:
           kubectl apply -f priorityclasses.yaml
 
           # Install the pinned TLS controllers; their CRDs must exist before the
-          # manifests below (GoogleCASClusterIssuer, Bundle) are applied. The
+          # manifests below (GoogleCASClusterIssuer, Bundle) are applied.
+          # Versions are pinned here AND documented in k8s/platform/README.md —
+          # bump the two together. The
           # google-cas-issuer KSA is annotated for Workload Identity (no keys).
           # cert-manager runs HA (2 replicas per component + PodDisruptionBudgets,
           # platform-critical priority) so a node drain never stops issuance;

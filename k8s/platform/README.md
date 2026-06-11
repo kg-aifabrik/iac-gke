@@ -16,7 +16,9 @@ issuance (design §5). trust-manager and google-cas-issuer stay single-replica o
 PodDisruptionBudget on one replica blocks node drains, and a brief pause is tolerable
 because certificate renewal and bundle distribution are asynchronous.
 
-*(Confirm/bump exact versions at build.)*
+*(The executing copy of these installs lives in the apply workflow —
+[`.github/workflows/terraform-apply.yml`](../../.github/workflows/terraform-apply.yml).
+The pinned versions appear in both places: bump them there and here together.)*
 
 ## Install order (run by the pipeline)
 
