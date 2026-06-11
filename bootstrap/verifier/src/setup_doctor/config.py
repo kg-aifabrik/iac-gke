@@ -24,7 +24,9 @@ DEFAULT_REQUIRED_APIS: tuple[str, ...] = (
 )
 
 # APIs the hardened cluster and its supply chain need (checked only in cluster
-# mode — when a region is configured). Mirrors the project-foundation module.
+# mode — when a region is configured). Mirrors the project-foundation module's
+# service list, minus the keyless-access baseline already covered by
+# DEFAULT_REQUIRED_APIS above — keep the two in sync when the foundation grows.
 DEFAULT_CLUSTER_APIS: tuple[str, ...] = (
     "container.googleapis.com",
     "compute.googleapis.com",
@@ -39,6 +41,9 @@ DEFAULT_CLUSTER_APIS: tuple[str, ...] = (
     "monitoring.googleapis.com",
     "secretmanager.googleapis.com",
     "dns.googleapis.com",
+    "certificatemanager.googleapis.com",  # public gateway certs (M2, TC-7)
+    "privateca.googleapis.com",  # CAS private CA for internal TLS (M2, TC-7)
+    "gkebackup.googleapis.com",  # Backup for GKE (M3, ADR-0004)
 )
 
 # The role both Google-managed service agents need on the cluster key (one for
