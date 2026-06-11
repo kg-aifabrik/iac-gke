@@ -42,7 +42,9 @@ the gated pipeline gives you:
 - **Ingress + TLS** — two gateways per cluster (internal `gke-l7-rilb`, external global). Public
   endpoints use Certificate Manager managed certificates; internal endpoints use a private
   Certificate Authority in Certificate Authority Service (CAS) via cert-manager /
-  google-cas-issuer / trust-manager. A baseline Cloud Armor policy fronts the external edge.
+  google-cas-issuer / trust-manager. A baseline Cloud Armor policy is provisioned for the
+  external edge — attaching and enforcing it is future work
+  ([#26](https://github.com/kg-aifabrik/iac-gke/issues/26)).
 - **High availability** — per-zone node autoscaling with pinned upgrade surge, Backup for GKE +
   restore, a regional persistent-disk StorageClass, multi-host ingress with Cloud DNS, and
   platform scheduling tiers.

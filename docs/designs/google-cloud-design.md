@@ -276,8 +276,9 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
     (Layer 7) Load Balancer on a private virtual IP reachable only inside the VPC; it uses the
     proxy-only subnet (§4) and serves internal tools, which carry no customer traffic.
   - an **external** gateway — GatewayClass **`gke-l7-global-external-managed`**, a global
-    external Application (Layer 7) Load Balancer on a public anycast IP, fronted by Cloud Armor;
-    it serves the end-user, internet-facing endpoints.
+    external Application (Layer 7) Load Balancer on a public anycast IP, with a baseline Cloud
+    Armor policy provisioned (attachment + enforcement: issue #26); it serves the end-user,
+    internet-facing endpoints.
 - Both gateways are Layer-7 Application Load Balancers; *internal* versus *external* denotes
   where the virtual IP is reachable, not the OSI layer.
 - The gateways are platform-owned and live in a dedicated gateway namespace. Workload
@@ -292,10 +293,11 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   (minimum TLS 1.2, prefer 1.3), the **HTTP→HTTPS redirect**, and the certificates. A reusable
   **gateway module** instantiates both gateways from one baseline, so their posture is uniform
   by construction.
-- **WAF** (Cloud Armor) applies to the **external** gateway — the only internet door. A baseline
-  policy ships now; fully enabling and tuning the rule set (OWASP rules in enforce mode,
-  rate-limiting) is tracked as a separate issue. The internal gateway needs no internet WAF — it
-  relies on network policy and being unreachable from outside the VPC.
+- **WAF** (Cloud Armor) belongs to the **external** gateway — the only internet door. A baseline
+  policy resource ships now but is **not yet attached** to any backend; attaching it (a
+  `GCPBackendPolicy` per public backend) and enabling/tuning the rule set (OWASP rules in
+  enforce mode, rate-limiting) is tracked in issue #26. The internal gateway needs no internet
+  WAF — it relies on network policy and being unreachable from outside the VPC.
 
 ### Certificates (TC-7)
 - **External (public) endpoints → Certificate Manager managed certificates.** Publicly trusted,
@@ -434,8 +436,9 @@ plumbing** — a CAS-issued leaf in a Secret attaches to the `gke-l7-rilb` gatew
 `tls.certificateRefs`, with the proxy-only subnet in place (verified live, HTTPS 200 against the
 CAS root). Still open:
 
-- **Full WAF enablement** — the external gateway ships a baseline Cloud Armor policy; enabling and
-  tuning the OWASP rule set in enforce mode + rate-limiting is tracked as its own issue (#26).
+- **Full WAF enablement** — the external gateway ships a baseline Cloud Armor policy that is not
+  yet attached to any backend; attaching it (`GCPBackendPolicy`) and enabling/tuning the OWASP
+  rule set in enforce mode + rate-limiting is tracked as its own issue (#26).
 - **Staging/production upgrade mechanism** — deferred until the stage/prod clusters are built
   (release channel + maintenance exclusions vs. a pinned version).
 - **Service-to-service mutual TLS / service mesh** — a security-phase decision (SEC-10); the

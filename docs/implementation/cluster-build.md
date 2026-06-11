@@ -211,8 +211,9 @@ trust bundle, and the leaf `Certificate`s are rendered manifests (see the in-clu
 Every cluster gets **two gateways**, one module instance each (ADR-0001):
 
 - **External** (`gke-l7-global-external-managed`) — a global external Application Load Balancer
-  for end-user traffic: a reserved global IP, a baseline Cloud Armor policy (WAF enforcement is
-  deferred — issue #26), and **per-hostname** Certificate Manager managed certificates (a DNS
+  for end-user traffic: a reserved global IP, a baseline Cloud Armor policy (created but not yet
+  attached to any backend; attachment + WAF enforcement is issue #26), and **per-hostname**
+  Certificate Manager managed certificates (a DNS
   authorization + certificate + certificate-map *entry* per host; the map stays singular and is
   attached by the `networking.gke.io/certmap` annotation, serving certs by SNI — ADR-0005). The
   HTTPS listener carries no inline `tls` block — certificates come from the certmap.
