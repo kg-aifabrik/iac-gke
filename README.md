@@ -152,19 +152,22 @@ gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop # gated; delete
 
 **Completed**
 
-- **Milestone 0 — Verified keyless access:** WIF + impersonation proven by a green CI run.
-- **Milestone 1 — Cluster factory:** the hardened private regional cluster as `account ×
-  environment × purpose` configuration, plus the gated pipeline.
-- **Milestone 2 — Ingress and TLS:** the two gateways, public + private (CAS) certificates, and a
-  baseline WAF.
-- **Milestone 3 — High availability:** autoscaling, Backup for GKE + restore, regional-PD storage,
-  multi-host ingress + Cloud DNS, and scheduling tiers — **validated 13/13 on a live cluster**,
-  then torn down.
+- **[Milestone 0 — Verified keyless access](https://github.com/kg-aifabrik/iac-gke/milestone/1):**
+  WIF + impersonation proven by a green CI run.
+- **[Milestone 1 — Cluster factory](https://github.com/kg-aifabrik/iac-gke/milestone/2):** the
+  hardened private regional cluster as `account × environment × purpose` configuration, plus the
+  gated pipeline.
+- **[Milestone 2 — Ingress and TLS](https://github.com/kg-aifabrik/iac-gke/milestone/3):** the two
+  gateways, public + private (CAS) certificates, and a baseline WAF.
+- **[Milestone 3 — High availability](https://github.com/kg-aifabrik/iac-gke/milestone/4):**
+  autoscaling, Backup for GKE + restore, regional-PD storage, multi-host ingress + Cloud DNS, and
+  scheduling tiers — **validated 13/13 on a live cluster**, then torn down.
 
 **Pending**
 
-- **Milestone 3** is held open for one cold-start assertion (node-pool growth under load) that can
-  only be observed on the next bring-up — [#46](https://github.com/kg-aifabrik/iac-gke/issues/46).
+- **[Milestone 3](https://github.com/kg-aifabrik/iac-gke/milestone/4)** is held open for one
+  cold-start assertion (node-pool growth under load) that can only be observed on the next
+  bring-up — [#46](https://github.com/kg-aifabrik/iac-gke/issues/46).
 - **Milestone 4 — Security hardening** is planned (Binary Authorization enforce, posture,
   namespace stamps, mTLS) — [#17](https://github.com/kg-aifabrik/iac-gke/issues/17).
 - Deferred follow-ups (observability, MDM trust distribution, image mirroring, …) are tracked as
