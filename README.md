@@ -191,6 +191,7 @@ k8s/platform/  pinned in-cluster TLS add-ons (cert-manager / google-cas-issuer /
 examples/      runnable, hardened reference workloads + validate.sh (end-user checks)
 bootstrap/
   setup-keyless-access.sh     one-time keyless setup (human-run)
+  teardown-keyless-access.sh  idempotent teardown of the keyless setup (human-run)
   setup-build-foundation.sh   Terraform state bucket + build-role elevation (human-run)
   verifier/                   setup-doctor — preflight checks (keyless + cluster + ingress + HA)
 docs/
