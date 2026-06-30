@@ -1,13 +1,15 @@
 # iac-gke
 
-Infrastructure, policy, and automation for the AiFabrik Site Reliability Engineering (SRE) team:
-how we build and run hardened, private, regional **Google Kubernetes Engine (GKE)** clusters on
-Google Cloud. The Terraform, the in-cluster manifests, the keyless pipeline, the verifier, and
-the design/decision records all live here and evolve together.
+Infrastructure, policy, and automation for the AiFabrik Site Reliability
+Engineering (SRE) team. It is how we build and run hardened, private, regional
+**Google Kubernetes Engine (GKE)** clusters on Google Cloud. Everything lives
+here and evolves together: the Terraform, the in-cluster manifests, the keyless
+pipeline, the verifier, and the design and decision records.
 
-This is the repository whose GitHub Actions automation is trusted to reach Google Cloud
-**keylessly** — Workload Identity Federation (WIF), no stored keys — so it is **private** by
-design. (The [`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl) repo is reserved for
+This repository's GitHub Actions automation is trusted to reach Google Cloud
+**keylessly** — through Workload Identity Federation (WIF), with no stored keys.
+So the repository is **private** by design. (The
+[`cluster-ctrl`](https://github.com/kg-aifabrik/cluster-ctrl) repo is reserved for
 the future Operations Console.)
 
 > **Audience:** operators who set up their environment to drive this automation — to build a new
@@ -17,36 +19,36 @@ the future Operations Console.)
 
 ## What this project does
 
-It turns a hardened cluster recipe into something you **choose, not code**. A cluster is named by
-three coordinates:
+It turns a hardened cluster recipe into something you **choose, not code**. Every cluster is named
+by three coordinates:
 
 - **account** — the Google Cloud project,
 - **environment** — `dev` / `stage` / `prod`,
-- **purpose** — Fleet Operations Plane (FOP), Management Plane (MGMT), …
+- **purpose** — Fleet Operations Plane (FOP), Management Plane (MGMT), and so on.
 
-One recipe; sizing and options vary per `(environment, purpose)`. Driving the automation through
-the gated pipeline gives you:
+There is one recipe; the sizing and options vary per `(environment, purpose)`. Driving the
+automation through the gated pipeline gives you:
 
-- **Cluster** — private, regional, a Domain Name System (DNS)-only control-plane endpoint (no
-  public application programming interface (API) server), Dataplane V2, shielded +
+- **Cluster** — private and regional, with a Domain Name System (DNS)-only control-plane endpoint
+  (no public application programming interface (API) server). It runs Dataplane V2, shielded
   Container-Optimized OS nodes, Workload Identity, Customer-Managed Encryption Keys (CMEK) for
   secrets and disks, Binary Authorization, managed Prometheus, and fleet membership.
-- **Network** — a custom Virtual Private Cloud, alias-IP Pod/Service ranges, Private Google
+- **Network** — a custom Virtual Private Cloud, alias-IP Pod and Service ranges, Private Google
   Access, an optional Cloud Network Address Translation (NAT), and a proxy-only subnet for the
   internal gateway.
-- **Supply chain** — Artifact Registry (a private repository + a Docker Hub pull-through proxy), a
-  repository-scoped node reader, and a Binary Authorization policy.
-- **Access** — no public endpoint; operators and automation reach the cluster only through
-  **Connect Gateway** (Google Identity and Access Management (IAM) + in-cluster role-based access
-  control).
+- **Supply chain** — Artifact Registry (a private repository plus a Docker Hub pull-through proxy),
+  a repository-scoped node reader, and a Binary Authorization policy.
+- **Access** — no public endpoint. Operators and automation reach the cluster only through
+  **Connect Gateway** (Google Identity and Access Management (IAM) plus in-cluster role-based
+  access control).
 - **Ingress + TLS** — two gateways per cluster (internal `gke-l7-rilb`, external global). Public
   endpoints use Certificate Manager managed certificates; internal endpoints use a private
-  Certificate Authority in Certificate Authority Service (CAS) via cert-manager /
-  google-cas-issuer / trust-manager. A baseline Cloud Armor policy is provisioned for the
-  external edge — attaching and enforcing it is future work
+  Certificate Authority in Certificate Authority Service (CAS), via cert-manager,
+  google-cas-issuer, and trust-manager. A baseline Cloud Armor policy is provisioned for the
+  external edge; attaching and enforcing it is future work
   ([#26](https://github.com/kg-aifabrik/iac-gke/issues/26)).
-- **High availability** — per-zone node autoscaling with pinned upgrade surge, Backup for GKE +
-  restore, a regional persistent-disk StorageClass, multi-host ingress with Cloud DNS, and
+- **High availability** — per-zone node autoscaling with a pinned upgrade surge, Backup for GKE
+  plus restore, a regional persistent-disk StorageClass, multi-host ingress with Cloud DNS, and
   platform scheduling tiers.
 
 Everything is keyless, every change is gated behind a human approval, and the *why* behind each
@@ -57,40 +59,42 @@ choice is recorded as an Architecture Decision Record (ADR) — see
 
 ## Set up your environment to contribute
 
-Operators run two one-time, human-run bootstraps (they elevate the identity the automation then
-uses, so the automation can't grant them to itself), wire up the GitHub approval gate, and verify.
+As an operator you run two one-time bootstraps by hand, wire up the GitHub approval gate, and
+verify. The bootstraps are human-run because they elevate the identity the automation then uses —
+so the automation can't grant them to itself.
 
 **Prerequisites**
 
 - The [`gcloud` CLI](https://cloud.google.com/sdk/docs/install) and the
-  [`gh` CLI](https://cli.github.com/), both authenticated (`gcloud auth login`, `gh auth login`).
-- [Terraform](https://developer.hashicorp.com/terraform/install) **1.15.5** (the version the CI
-  pins), and Python 3 for `setup-doctor`.
+  [`gh` CLI](https://cli.github.com/), both signed in (`gcloud auth login`, `gh auth login`).
+- [Terraform](https://developer.hashicorp.com/terraform/install) **1.15.5** (the version CI pins),
+  and Python 3 for `setup-doctor`.
 - On the target project: **Owner**, or the admin roles listed in
-  [runbook 01](docs/runbooks/01-keyless-access-setup.md#prerequisites). Billing enabled.
+  [runbook 01](docs/runbooks/01-keyless-access-setup.md#before-you-start--confirm-the-prerequisites).
+  Billing enabled.
 
 **Steps**
 
-1. **Keyless access** (one-time) — create the WIF pool/provider, the least-privilege automation
-   service account, and the repository variables. Recommended: run the idempotent script; the
-   runbook documents exactly what it does.
+1. **Keyless access** (one-time) — create the WIF pool and provider, the least-privilege automation
+   service account, and the repository variables. The easy path is the idempotent script; the
+   runbook explains exactly what it does.
    ```bash
    ./bootstrap/setup-keyless-access.sh    # see docs/runbooks/01-keyless-access-setup.md
    ```
 2. **Build foundation** (one-time) — create the versioned Terraform state bucket and elevate the
    automation service account to the least-privilege **build** role set.
    ```bash
-   ./bootstrap/setup-build-foundation.sh --project <DEV_PROJECT_ID> --account <you@aifabrik.com>
+   ./bootstrap/setup-build-foundation.sh --project <PROJECT_ID> --account <you@aifabrik.com>
    ```
-3. **GitHub gate + variables** — a `dev` Environment whose **required reviewers** are the SRE
-   approvers (this is the approval gate on every apply/destroy), plus the repository variables
-   (`GCP_*`, `WIF_*`, `SRE_OPERATOR_MEMBERS`). Step-by-step in
+3. **GitHub gate and variables** — set up a `dev` Environment whose **required reviewers** are the
+   SRE approvers (this is the approval gate on every apply and destroy), plus the repository
+   variables (`GCP_*`, `WIF_*`, `SRE_OPERATOR_MEMBERS`). Step-by-step in
    [runbook 02 §2](docs/runbooks/02-cluster-bringup.md).
-4. **Verify** — run `setup-doctor` locally (full audit with your operator credentials), then
+4. **Verify** — run `setup-doctor` locally for a full audit with your operator credentials, then
    trigger the **Verify keyless access** workflow for a green CI run. Both are in
    [runbook 01 §6–7](docs/runbooks/01-keyless-access-setup.md).
 
-Account and project values stay **out of git** — they're supplied at `init`/apply time and via
+Account and project values stay **out of git**. They're supplied at `init`/apply time and through
 repository variables, never committed. The working conventions for changes in this repo (commit
 discipline, documentation, the chunk/milestone workflow) are in [`CLAUDE.md`](CLAUDE.md).
 
@@ -98,9 +102,9 @@ discipline, documentation, the chunk/milestone workflow) are in [`CLAUDE.md`](CL
 
 ## Build a cluster and run day-2 operations
 
-Everything flows through the same keyless, gated pipeline. **You never apply from your laptop** —
-you open a pull request (PR) to preview the plan, then dispatch the apply, and an SRE approves the
-`dev` Environment before anything changes.
+Everything flows through the same keyless, gated pipeline. **You never apply from your laptop.** You
+open a pull request (PR) to preview the plan, then dispatch the apply, and an SRE approves the `dev`
+Environment before anything changes.
 
 ```
 edit terraform/  →  PR  →  terraform-plan posts the plan on the PR  →  review
@@ -108,22 +112,22 @@ edit terraform/  →  PR  →  terraform-plan posts the plan on the PR  →  rev
                  →  saved plan applies  →  in-cluster manifests applied over Connect Gateway
 ```
 
-**Build a new cluster (bring-up).** Apply the roots in order, approving each in the `dev`
-Environment. The full ordered, copy-paste procedure — including the one-time DNS delegation step
-and what to verify — is [runbook 02](docs/runbooks/02-cluster-bringup.md).
+**Build a new cluster (bring-up).** Apply the roots in order, approving each one in the `dev`
+Environment. The full ordered, copy-paste procedure — including the one-time DNS delegation step and
+what to verify — is [runbook 02](docs/runbooks/02-cluster-bringup.md).
 
 ```bash
 gh workflow run terraform-apply.yml -f root=foundation   # services, KMS key + CMEK grants, node SA
 gh workflow run terraform-apply.yml -f root=fop          # the cluster, then the TLS add-ons + gateways
 ```
 
-**Change an existing cluster (day-2 operations).** Day-2 changes use the *same* path — edit the
+**Change an existing cluster (day-2 operations).** Day-2 changes take the *same* path: edit the
 relevant Terraform (or in-cluster manifest), open a PR to review the plan, then dispatch
 `terraform-apply -f root=fop` and approve. Because the plan is **saved** and re-applied, what you
-reviewed is exactly what runs. Typical day-2 operations: resize or retune **node-pool
-autoscaling** and upgrade surge, add an **ingress hostname**, run a **Backup for GKE** restore,
-adjust **Cloud DNS** records, or perform a **controlled version upgrade**. How each works is in
-the living build doc, [`docs/implementation/cluster-build.md`](docs/implementation/cluster-build.md).
+reviewed is exactly what runs. Common day-2 operations: resize or retune **node-pool autoscaling**
+and the upgrade surge, add an **ingress hostname**, run a **Backup for GKE** restore, adjust
+**Cloud DNS** records, or run a **controlled version upgrade**. How each one works is in the living
+build doc, [`docs/implementation/cluster-build.md`](docs/implementation/cluster-build.md).
 
 **Verify.**
 
@@ -132,16 +136,16 @@ setup-doctor              # preflight: identity, controls, ingress, and HA postu
 examples/validate.sh      # end-user: deploys 13 cases and asserts the end-to-end outcomes
 ```
 
-`setup-doctor` audits the live cluster's controls (private endpoint, CMEK, shielded nodes,
-Workload Identity, autoscaling, backup plan, DNS zones, active certs); `validate.sh` proves
-serving over both gateways, drain survival and a zero-failed-request rolling deploy, autoscaling,
-HPA, regional-PD zone failover, preemption, and backup→restore. The case matrix is in
-[`examples/README.md`](examples/README.md); the verify/record steps are in
+`setup-doctor` audits the live cluster's controls (private endpoint, CMEK, shielded nodes, Workload
+Identity, autoscaling, backup plan, DNS zones, active certificates). `validate.sh` proves serving
+over both gateways, drain survival, a zero-failed-request rolling deploy, autoscaling, HPA,
+regional-PD zone failover, preemption, and backup→restore. The case matrix is in
+[`examples/README.md`](examples/README.md); the verify and record steps are in
 [runbook 02 §5–7](docs/runbooks/02-cluster-bringup.md).
 
 **Tear down (dev is ephemeral).** A `fop` teardown leaves **zero billable resources** — only the
-free, undeletable foundation singletons remain (enabled APIs, the node service account, the KMS
-key shell).
+free, undeletable foundation singletons remain (the enabled APIs, the node service account, and the
+KMS key shell).
 
 ```bash
 examples/validate.sh --cleanup                                   # remove throwaway test scaffolding first
