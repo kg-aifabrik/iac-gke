@@ -1,0 +1,82 @@
+# Cluster factory registry — the single source of truth for which clusters exist
+# and their shape/sizing per (environment, purpose).
+#
+# The generator (tools/cluster-factory) reads this file to render one Terraform
+# root per active cluster (terraform/envs/<env>/<purpose>/) and to regenerate the
+# pipeline's env/purpose input lists. See docs/adr/0009-cluster-purpose-expansion.md
+# and docs/designs/cluster-purpose-expansion.md.
+#
+# Effective config for a cluster is the ordered merge:
+#   defaults -> environments[env] -> purposes[purpose] -> cluster overrides
+#
+# `env` is a FIXED set: dev, stage, prod (posture differs per env). `purpose` is
+# the OPEN axis — add a purpose under `purposes:` and a cluster under `clusters:`,
+# then run bootstrap/add-cluster-purpose.sh to prime the automation.
+#
+# Account/identity values (project_id, region, operator_members, automation_member,
+# state bucket) are NOT here — the pipeline injects them as TF_VAR_* from
+# repository variables, so nothing project-specific is committed.
+
+defaults: {}
+
+# --- Environments (the three fixed envs) ------------------------------------
+# Per-env posture. Only `dev` is wired end-to-end today; stage/prod are modeled
+# here so the shape is explicit, but their pipelines/projects are future work
+# (env-expansion, out of scope of ADR-0009).
+environments:
+  dev:
+    cas_tier: DEVOPS              # cheapest CA tier; teardown leaves no standing cost (ADR-0002)
+    release_channel: REGULAR      # dev rides auto-upgrades in a weekend window
+    deletion_protection: false    # dev is short-lived / torn down during verification
+    enable_cloud_nat: true        # TLS add-ons pull from quay.io over NAT
+    manage_public_dns: true       # prove the automated public-DNS path in dev (ADR-0006)
+    maintenance_recurring_window:
+      start_time: "2026-01-03T09:00:00Z"   # a Saturday 09:00 UTC
+      end_time: "2026-01-03T17:00:00Z"
+      recurrence: "FREQ=WEEKLY;BYDAY=SA,SU"
+  stage:
+    cas_tier: ENTERPRISE
+    release_channel: STABLE
+    deletion_protection: true
+    enable_cloud_nat: true
+    manage_public_dns: true
+  prod:
+    cas_tier: ENTERPRISE
+    release_channel: STABLE
+    deletion_protection: true
+    enable_cloud_nat: true
+    manage_public_dns: true
+
+# --- Purposes (the open axis) ------------------------------------------------
+# Per-purpose cluster shape/sizing. Add a new purpose here.
+purposes:
+  fop:                            # Fleet Operations Plane
+    general_machine_type: e2-medium
+    general_autoscaling:
+      min_per_zone: 1
+      max_per_zone: 2
+  mgmt:                           # Management Plane — external, customer-facing (same shape as fop)
+    general_machine_type: e2-medium
+    general_autoscaling:
+      min_per_zone: 1
+      max_per_zone: 2
+
+# --- Active clusters ---------------------------------------------------------
+# Each entry is one (env, purpose) cluster the factory builds, plus its
+# per-cluster ingress hostnames and DNS zones (inherently per-cluster).
+clusters:
+  - env: dev
+    purpose: fop
+    # Matches today's dev-fop root exactly so its regeneration is a no-op.
+    external_hostnames: [app.dev.arthos.app, hello.dev.arthos.app]
+    internal_hostnames: [hello.dev.aifabrik.com, tools.dev.aifabrik.com]
+    internal_zone_domain: dev.aifabrik.com
+    public_zone_domain: dev.arthos.app
+  - env: dev
+    purpose: mgmt
+    # Customer-facing; confirm the real hostnames + delegate the public subdomain
+    # before the live build (C5). Placeholders mirror fop's shape.
+    external_hostnames: [app.mgmt.dev.arthos.app, hello.mgmt.dev.arthos.app]
+    internal_hostnames: [hello.mgmt.dev.aifabrik.com, tools.mgmt.dev.aifabrik.com]
+    internal_zone_domain: mgmt.dev.aifabrik.com
+    public_zone_domain: mgmt.dev.arthos.app

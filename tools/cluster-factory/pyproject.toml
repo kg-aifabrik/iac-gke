@@ -1,0 +1,15 @@
+# cluster-factory — generates per-(env,purpose) Terraform roots and the pipeline's
+# env/purpose input lists from config/clusters.yaml (ADR-0009).
+[project]
+name = "cluster-factory"
+version = "0.1.0"
+description = "Render Terraform roots and pipeline inputs from the cluster registry."
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6,<7"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
