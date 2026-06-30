@@ -15,12 +15,16 @@ from cluster_factory.registry import (
     load,
     validate,
 )
+from cluster_factory.render import TerraformMissingError, cluster_dir, generate
 
 __all__ = [
     "RegistryError",
+    "TerraformMissingError",
     "VALID_ENVS",
     "active_clusters",
+    "cluster_dir",
     "effective_config",
+    "generate",
     "load",
     "validate",
 ]

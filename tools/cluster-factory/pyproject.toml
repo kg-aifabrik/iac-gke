@@ -7,9 +7,17 @@ description = "Render Terraform roots and pipeline inputs from the cluster regis
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6,<7"]
 
+[project.scripts]
+cluster-factory = "cluster_factory.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Ship every template, including the canonical lock at templates/terraform.lock.hcl
+# (one level above root/), so non-editable installs find them too.
+cluster_factory = ["templates/*", "templates/root/*"]

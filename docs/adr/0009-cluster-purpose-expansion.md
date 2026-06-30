@@ -62,9 +62,15 @@ per-combo roots drift.
   between sentinel markers. Python — not bash + `yq` — because the registry is
   YAML, the merge logic is non-trivial, and it is unit-testable alongside the
   existing pytest verifier.
-- **Generated roots are committed** (like lockfiles). An **idempotency check**
-  (regenerate → empty `git diff`) guards against drift, and regenerating `dev-fop`
-  must be **byte-identical** to today's root.
+- **Generated roots are committed** (like lockfiles) and **normalized** (uniform
+  across purposes). An **idempotency check** (regenerate → empty `git diff`)
+  guards against drift. Migrating an existing cluster regenerates its source into
+  the normalized form; the proof that **no infrastructure changes** is a
+  `terraform plan` **no-op** (the module inputs are unchanged), verified in CI —
+  not byte-identical source. (Byte-identical was the first intent but was dropped:
+  `fop`'s hand-written root carried bespoke, partly-stale prose that can't be
+  reproduced faithfully across purposes; normalizing is cleaner and the plan-no-op
+  is the meaningful guarantee.)
 - **Pipeline inputs** become `env` (choice, fixed `dev/stage/prod`) + `purpose`
   (choice = `foundation` + the registry's purposes); `TF_ROOT =
   terraform/envs/<env>/<purpose>`. `foundation` stays a selectable special root.
@@ -78,7 +84,11 @@ per-combo roots drift.
 
 - **Good:** adding a purpose is edit-config-then-prime; state stays isolated per
   combo; a PR shows both the data change and the generated root; no module
-  changes; `dev-fop` is provably unchanged by the migration.
+  changes; `dev-fop`'s module inputs are unchanged, so its migration is a
+  `terraform plan` no-op.
+- **Bad:** migrating `fop` rewrites its hand-tuned source into the normalized
+  form (prose becomes uniform); the plan no-op proves no infra change, but the
+  source diff is large at migration time.
 - **Good:** the registry is the single source of truth that the docs and the
   pipeline both derive from.
 - **Bad:** generated-but-committed roots can drift if someone hand-edits them —

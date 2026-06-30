@@ -75,7 +75,8 @@ clusters:                     # which (env,purpose) combos are active
 Every `cluster-stack` shape input is expressible through these layers. Per-cluster
 hostnames and DNS domains live on the `clusters[]` entry (they are inherently
 per-`(env,purpose)`). The `dev-fop` entry is chosen to reproduce today's pinned
-values **exactly**, so its regenerated root is byte-identical.
+module **inputs** exactly, so regenerating it is a `terraform plan` no-op (the
+generated source is normalized, not byte-identical to the hand-written root).
 
 Validation rules the loader enforces: `env ∈ {dev,stage,prod}`; `purpose` exists
 in `purposes`; no duplicate `(env,purpose)`; required shape fields resolved after
@@ -109,8 +110,10 @@ generator and prints next steps (PR the diff, then dispatch the build).
 
 ## Testing strategy
 
-- **Golden:** regenerating `dev-fop` yields an empty `git diff` (byte-identical).
-- **Validity:** generated `dev-mgmt` passes `terraform fmt -check` + `validate`.
+- **No-op migration:** regenerating `dev-fop` keeps the cluster-stack module
+  inputs unchanged, so `terraform plan` shows no changes (verified in CI, since
+  `plan` needs cloud state).
+- **Validity:** generated roots pass `terraform fmt -check` + `validate`.
 - **Idempotency:** `generate` run twice → empty diff; `--check` passes on a clean
   tree and fails on a hand-edited root.
 - **Schema:** malformed registry (bad env, missing field, duplicate combo) →
