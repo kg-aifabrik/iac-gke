@@ -117,13 +117,13 @@ Environment. The full ordered, copy-paste procedure — including the one-time D
 what to verify — is [runbook 02](docs/runbooks/02-cluster-bringup.md).
 
 ```bash
-gh workflow run terraform-apply.yml -f root=foundation   # services, KMS key + CMEK grants, node SA
-gh workflow run terraform-apply.yml -f root=fop          # the cluster, then the TLS add-ons + gateways
+gh workflow run terraform-apply.yml -f env=dev -f purpose=foundation   # services, KMS key + CMEK grants, node SA
+gh workflow run terraform-apply.yml -f env=dev -f purpose=fop          # the cluster, then the TLS add-ons + gateways
 ```
 
 **Change an existing cluster (day-2 operations).** Day-2 changes take the *same* path: edit the
 relevant Terraform (or in-cluster manifest), open a PR to review the plan, then dispatch
-`terraform-apply -f root=fop` and approve. Because the plan is **saved** and re-applied, what you
+`terraform-apply -f env=dev -f purpose=fop` and approve. Because the plan is **saved** and re-applied, what you
 reviewed is exactly what runs. Common day-2 operations: resize or retune **node-pool autoscaling**
 and the upgrade surge, add an **ingress hostname**, run a **Backup for GKE** restore, adjust
 **Cloud DNS** records, or run a **controlled version upgrade**. How each one works is in the living
@@ -149,7 +149,7 @@ KMS key shell).
 
 ```bash
 examples/validate.sh --cleanup                                   # remove throwaway test scaffolding first
-gh workflow run terraform-destroy.yml -f root=fop -f confirm=fop # gated; deletes gateways before edge resources
+gh workflow run terraform-destroy.yml -f env=dev -f purpose=fop -f confirm=fop # gated; deletes gateways before edge resources
 ```
 
 ---

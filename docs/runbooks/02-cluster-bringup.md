@@ -105,7 +105,7 @@ The other variables — `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `WIF_PROVIDER`, 
 Build the per-project foundation first.
 
 ```bash
-gh workflow run terraform-apply.yml -f root=foundation
+gh workflow run terraform-apply.yml -f env=<env> -f purpose=foundation
 # Approve the run in the '<env>' Environment when prompted. Creates the enabled
 # services, the KMS key and its two CMEK grants, and the node service account.
 ```
@@ -116,7 +116,7 @@ First open a pull request that touches `terraform/`. The plan is posted on the
 PR — review it. Then dispatch the apply:
 
 ```bash
-gh workflow run terraform-apply.yml -f root=<purpose>
+gh workflow run terraform-apply.yml -f env=<env> -f purpose=<purpose>
 # Approve in '<env>'. It applies the saved plan, then connects over Connect Gateway
 # to Helm-install the pinned TLS controllers (cert-manager, trust-manager,
 # google-cas-issuer) and apply the in-cluster platform manifests — operator RBAC,
@@ -201,7 +201,7 @@ actually confirmed, then close the issues.
 
 ```bash
 examples/validate.sh --cleanup   # 🧑 first: remove the throwaway Workload Identity scaffolding (GSA + secret)
-gh workflow run terraform-destroy.yml -f root=<purpose> -f confirm=<purpose>   # confirm must match root
+gh workflow run terraform-destroy.yml -f env=<env> -f purpose=<purpose> -f confirm=<purpose>   # confirm must match purpose
 # Approve in '<env>'. The destroy workflow deletes the in-cluster Gateways first,
 # so the GKE Gateway controller releases its load balancers before Terraform
 # removes the edge resources (#31). The CAS hierarchy uses per-cluster,
