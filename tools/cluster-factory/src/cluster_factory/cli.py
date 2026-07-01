@@ -15,6 +15,7 @@ from pathlib import Path
 
 from cluster_factory.render import TerraformMissingError, generate
 from cluster_factory.registry import RegistryError
+from cluster_factory.workflows import WorkflowMarkerError
 
 
 def _default_repo_root() -> Path:
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = generate(registry, repo_root, check=args.check, dry_run=args.dry_run)
-    except (RegistryError, FileNotFoundError, TerraformMissingError) as exc:
+    except (RegistryError, FileNotFoundError, TerraformMissingError, WorkflowMarkerError) as exc:
         print(f"cluster-factory: {exc}", file=sys.stderr)
         return 2
     except subprocess.CalledProcessError as exc:

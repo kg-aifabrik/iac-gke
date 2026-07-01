@@ -16,15 +16,18 @@ from cluster_factory.registry import (
     validate,
 )
 from cluster_factory.render import TerraformMissingError, cluster_dir, generate
+from cluster_factory.workflows import WorkflowMarkerError, update_workflows
 
 __all__ = [
     "RegistryError",
     "TerraformMissingError",
     "VALID_ENVS",
+    "WorkflowMarkerError",
     "active_clusters",
     "cluster_dir",
     "effective_config",
     "generate",
     "load",
+    "update_workflows",
     "validate",
 ]

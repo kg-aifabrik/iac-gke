@@ -15,13 +15,23 @@ name: Terraform destroy
 on:
   workflow_dispatch:
     inputs:
-      root:
-        description: Which dev root to destroy
+      env:
+        description: Target environment (only 'dev' is wired today; stage/prod are modeled but not built)
         type: choice
-        options: [fop, foundation]
+        options: [dev, stage, prod]
+        default: dev
+      purpose:
+        description: Cluster purpose (or 'foundation' for the per-project root)
+        type: choice
         default: fop
+        # >>> cluster-factory:purposes — generated from config/clusters.yaml; do not edit by hand
+        options:
+          - foundation
+          - fop
+          - mgmt
+        # <<< cluster-factory:purposes
       confirm:
-        description: Type the root name again to confirm (safety check)
+        description: Type the purpose again to confirm (safety check)
         type: string
         required: true
 
@@ -30,17 +40,17 @@ permissions:
   id-token: write
 
 concurrency:
-  group: tf-destroy-${{ github.event.inputs.root }}
+  group: tf-destroy-${{ github.event.inputs.env }}-${{ github.event.inputs.purpose }}
   cancel-in-progress: false
 
 jobs:
   destroy:
     # Refuse to run unless the typed confirmation matches the chosen root.
-    if: github.event.inputs.confirm == github.event.inputs.root
+    if: github.event.inputs.confirm == github.event.inputs.purpose
     runs-on: ubuntu-latest
     environment: dev
     env:
-      TF_ROOT: terraform/envs/dev/${{ github.event.inputs.root }}
+      TF_ROOT: terraform/envs/${{ github.event.inputs.env }}/${{ github.event.inputs.purpose }}
       TF_IN_AUTOMATION: "true"
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
       TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
@@ -72,7 +82,7 @@ jobs:
       # (issue #31). Idempotent: skipped when the cluster's fleet membership is
       # already gone — e.g. a re-run after a partial destroy.
       - name: Delete in-cluster Gateways first (release controller-managed LBs)
-        if: github.event.inputs.root == 'fop'
+        if: github.event.inputs.purpose != 'foundation'
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
         run: |

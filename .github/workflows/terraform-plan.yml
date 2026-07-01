@@ -33,12 +33,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # foundation is the per-project root; fop is the dev cluster. fop reads
-        # foundation's remote state, so foundation must have been applied once
-        # before a fop plan can resolve.
-        root: [foundation, fop]
+        # foundation is the per-project root; each cluster reads its foundation's
+        # remote state, so foundation must have been applied once before a cluster
+        # plan can resolve. Generated from config/clusters.yaml.
+        # >>> cluster-factory:matrix — generated from config/clusters.yaml; do not edit by hand
+        include:
+          - { env: dev, purpose: foundation }
+          - { env: dev, purpose: fop }
+          - { env: dev, purpose: mgmt }
+        # <<< cluster-factory:matrix
     env:
-      TF_ROOT: terraform/envs/dev/${{ matrix.root }}
+      TF_ROOT: terraform/envs/${{ matrix.env }}/${{ matrix.purpose }}
       TF_IN_AUTOMATION: "true"
       # Inputs (account-specific values live in repository variables, not git).
       TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
@@ -80,7 +85,7 @@ jobs:
       - name: Upload saved plan
         uses: actions/upload-artifact@v4
         with:
-          name: plan-${{ matrix.root }}
+          name: plan-${{ matrix.env }}-${{ matrix.purpose }}
           path: |
             ${{ env.TF_ROOT }}/tfplan
             plan.txt

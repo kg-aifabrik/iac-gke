@@ -1,6 +1,6 @@
 # Terraform apply — gated, serialized, applies a saved plan.
 #
-# Manually dispatched against one dev root. The run plans first, then waits on
+# Manually dispatched against one (env, purpose) root. The run plans first, then waits on
 # the `dev` GitHub Environment whose required reviewers are the SRE approver
 # list — an apply cannot proceed without an explicit human approval. The apply
 # job consumes the *saved* plan from the plan job (same run), so what is applied
@@ -12,24 +12,34 @@ name: Terraform apply
 on:
   workflow_dispatch:
     inputs:
-      root:
-        description: Which dev root to apply
+      env:
+        description: Target environment (only 'dev' is wired today; stage/prod are modeled but not built)
         type: choice
-        options: [foundation, fop]
+        options: [dev, stage, prod]
+        default: dev
+      purpose:
+        description: Cluster purpose (or 'foundation' for the per-project root)
+        type: choice
         default: fop
+        # >>> cluster-factory:purposes — generated from config/clusters.yaml; do not edit by hand
+        options:
+          - foundation
+          - fop
+          - mgmt
+        # <<< cluster-factory:purposes
 
 permissions:
   contents: read
   id-token: write
 
-# Serialize applies for a given root; never cancel a running apply (mid-apply
+# Serialize applies per (env, purpose); never cancel a running apply (mid-apply
 # cancellation can corrupt state).
 concurrency:
-  group: tf-apply-${{ github.event.inputs.root }}
+  group: tf-apply-${{ github.event.inputs.env }}-${{ github.event.inputs.purpose }}
   cancel-in-progress: false
 
 env:
-  TF_ROOT: terraform/envs/dev/${{ github.event.inputs.root }}
+  TF_ROOT: terraform/envs/${{ github.event.inputs.env }}/${{ github.event.inputs.purpose }}
   TF_IN_AUTOMATION: "true"
   TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
   TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
@@ -61,7 +71,7 @@ jobs:
       - name: Upload saved plan
         uses: actions/upload-artifact@v4
         with:
-          name: apply-plan-${{ github.event.inputs.root }}
+          name: apply-plan-${{ github.event.inputs.env }}-${{ github.event.inputs.purpose }}
           path: ${{ env.TF_ROOT }}/tfplan
           retention-days: 1
 
@@ -90,7 +100,7 @@ jobs:
       - name: Download saved plan
         uses: actions/download-artifact@v4
         with:
-          name: apply-plan-${{ github.event.inputs.root }}
+          name: apply-plan-${{ github.event.inputs.env }}-${{ github.event.inputs.purpose }}
           path: ${{ env.TF_ROOT }}
       - name: Apply the saved plan
         run: terraform -chdir="$TF_ROOT" apply -no-color -input=false -lock-timeout=120s tfplan
@@ -100,7 +110,7 @@ jobs:
       # manifests the stack rendered (operator RBAC + encrypted StorageClass)
       # over Connect Gateway, once the cluster exists.
       - name: Install TLS add-ons and apply in-cluster manifests over Connect Gateway
-        if: github.event.inputs.root == 'fop'
+        if: github.event.inputs.purpose != 'foundation'
         env:
           USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
         run: |

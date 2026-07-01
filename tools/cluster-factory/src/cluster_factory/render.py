@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from cluster_factory.registry import active_clusters, effective_config, load
+from cluster_factory.workflows import update_workflows
 
 # Files produced by pure token substitution from templates/root/. main.tf is
 # built programmatically (it carries the per-cluster module inputs).
@@ -285,6 +286,13 @@ def generate(
                 (target / name).write_text(content, encoding="utf-8")
             for orphan in _orphan_source_files(target, managed):
                 orphan.unlink()
+
+    # Regenerate the pipeline's env/purpose enumerations from the same registry,
+    # so the dispatch menus and the roots that exist can never disagree.
+    if check or dry_run:
+        drift += update_workflows(repo_root, data, check=True)
+    else:
+        update_workflows(repo_root, data, check=False)
 
     # Orphan root directories (registry entry removed) are flagged in every mode
     # and never auto-deleted — the operator destroys the cluster, then removes it.
