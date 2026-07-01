@@ -323,51 +323,92 @@ EOF
 
 # --- high-availability checks (Milestone 3, issue #34) ----------------------
 
-# Continuous probe against the first external hostname (1 req/s) — the
+# Continuous IN-CLUSTER probe against the internal gateway (1 req/s) — the
 # drain/rolling checks assert ZERO non-200s while disruption is in progress.
-PROBE_FILE=""
-PROBE_PID=""
-start_probe() {
-  PROBE_FILE="$(mktemp)"
-  rm -f "${PROBE_FILE}.stop"
-  # The loop exits via a stop-file rather than a signal: a clean exit keeps
-  # wait's semantics and avoids the shell's "Terminated" job notices.
-  (
-    while [[ ! -e "${PROBE_FILE}.stop" ]]; do
-      curl -sS --max-time 5 --resolve "${EXTERNAL_HOSTS[0]}:443:${EXTERNAL_IP}" \
-        -o /dev/null -w '%{http_code}\n' "https://${EXTERNAL_HOSTS[0]}/" 2>/dev/null || echo 000
-      sleep 1
-    done >>"${PROBE_FILE}"
-  ) &
-  PROBE_PID=$!
+# The internal VIP is private (ADR-0006), so the probe runs inside the cluster:
+# it resolves the internal hostname BY NAME via the private zone and trusts the
+# CAS root (the cas-root ConfigMap). Probing the internal gateway makes these HA
+# checks independent of the public edge (managed certs / registrar DNS), so they
+# validate node drains and rolling deploys even when public ingress isn't set up.
+PROBE_NS="internal-tools"
+PROBE_POD="ha-probe"
+
+# start_internal_probe [exclude_node] — launch the probe pod and wait until it is
+# Running and emitting. exclude_node pins the prober OFF a node (via nodeAffinity)
+# so draining that node cannot evict the prober itself.
+start_internal_probe() {
+  local exclude_node="${1:-}" affinity_yaml="" probe_cmd phase
+  kubectl -n "${PROBE_NS}" delete pod "${PROBE_POD}" --ignore-not-found >/dev/null 2>&1 || true
+  if [[ -n "${exclude_node}" ]]; then
+    affinity_yaml="  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - { key: kubernetes.io/hostname, operator: NotIn, values: [\"${exclude_node}\"] }"
+  fi
+  # Single quotes only inside the command — the manifest wraps it in a
+  # double-quoted YAML scalar. '000' marks a connection failure (curl non-zero).
+  probe_cmd="while true; do curl -sS --max-time 5 --cacert /trust/ca.crt -o /dev/null -w '%{http_code}\\n' https://${INTERNAL_HOSTS[0]}/ 2>/dev/null || echo 000; sleep 1; done"
+  cat <<EOF | kubectl apply -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata: { name: ${PROBE_POD}, namespace: ${PROBE_NS} }
+spec:
+  restartPolicy: Never
+${affinity_yaml}
+  securityContext: { runAsNonRoot: true, runAsUser: 100, seccompProfile: { type: RuntimeDefault } }
+  containers:
+    - name: probe
+      image: ${REGISTRY_PROXY}/curlimages/curl:8.10.1
+      command: ["sh", "-c", "${probe_cmd}"]
+      securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+      volumeMounts:
+        - { name: trust, mountPath: /trust, readOnly: true }
+        - { name: tmp, mountPath: /tmp }
+  volumes:
+    - name: trust
+      configMap: { name: cas-root }
+    - name: tmp
+      emptyDir: {}
+EOF
+  # Wait until it's Running and has emitted at least one result, so the measured
+  # window actually covers the disruption we start next.
+  for _ in $(seq 1 24); do
+    phase="$(kubectl -n "${PROBE_NS}" get pod "${PROBE_POD}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    [[ "${phase}" == "Running" ]] && kubectl -n "${PROBE_NS}" logs "${PROBE_POD}" 2>/dev/null | grep -q . && return 0
+    sleep 5
+  done
+  return 0
 }
 
-# Stops the probe and reports "<total> <failures>".
-stop_probe() {
-  touch "${PROBE_FILE}.stop"
-  wait "${PROBE_PID}" 2>/dev/null || true
-  local total failures
-  total="$(wc -l <"${PROBE_FILE}" | tr -d ' ')"
-  failures="$(grep -cv '^200$' "${PROBE_FILE}" || true)"
-  rm -f "${PROBE_FILE}" "${PROBE_FILE}.stop"
+# stop_internal_probe — snapshot the probe's results, delete the pod, and report
+# "<total> <failures>" counting only numeric result lines (guards blank/noise).
+stop_internal_probe() {
+  local logs total failures
+  logs="$(kubectl -n "${PROBE_NS}" logs "${PROBE_POD}" 2>/dev/null || true)"
+  kubectl -n "${PROBE_NS}" delete pod "${PROBE_POD}" --ignore-not-found >/dev/null 2>&1 || true
+  total="$(grep -cE '^[0-9]+$' <<<"${logs}" || true)"
+  failures="$(grep -E '^[0-9]+$' <<<"${logs}" | grep -cv '^200$' || true)"
   echo "${total} ${failures}"
 }
 
 DRAINED_NODE=""
 check_drain_survival() {
   log "07 — drain survival (zero failed requests while a node drains)"
-  if [[ -z "${EXTERNAL_IP}" ]]; then
-    record SKIP drain-survival "needs the external gateway serving (run after 05)"; return
+  if [[ -z "${INTERNAL_IP}" || -z "${INTERNAL_HOSTS[0]:-}" ]]; then
+    record SKIP drain-survival "needs the internal gateway serving (run after 06)"; return
   fi
-  # Drain the node hosting one hello-web replica; spread + PDB + the gateway's
-  # health checks must keep the OTHER replica serving throughout.
+  # Drain the node hosting one internal hello-web replica; the zone spread + PDB
+  # (minAvailable 1) must keep the OTHER replica serving, and the internal
+  # gateway must keep routing to it, throughout the drain.
   local node
-  node="$(kubectl -n public-services get pod -l app=hello-web \
+  node="$(kubectl -n "${PROBE_NS}" get pod -l app=hello-web \
     -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)"
   if [[ -z "${node}" ]]; then
-    record FAIL drain-survival "no hello-web pod found in public-services"; return
+    record FAIL drain-survival "no hello-web pod found in ${PROBE_NS} (run 06 first)"; return
   fi
-  start_probe
+  start_internal_probe "${node}"   # keep the prober OFF the node we're draining
   DRAINED_NODE="${node}"
   # --force: earlier cases leave throwaway NAKED pods (pvc-writer,
   # wi-secret-reader) that drain refuses to touch otherwise; PDBs of managed
@@ -375,42 +416,42 @@ check_drain_survival() {
   # the autoscaler room to add a node if the evictees need new capacity.
   if ! kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data --force \
       --timeout=360s >/tmp/drain.log 2>&1; then
-    read -r _ _ < <(stop_probe)
+    stop_internal_probe >/dev/null
     kubectl uncordon "${node}" >/dev/null 2>&1 || true; DRAINED_NODE=""
     record FAIL drain-survival "drain of ${node} failed: $(tail -1 /tmp/drain.log | tr -d '\n' | tail -c 140)"
     return
   fi
-  kubectl -n public-services rollout status deploy/hello-web --timeout=180s >/dev/null 2>&1 || true
+  kubectl -n "${PROBE_NS}" rollout status deploy/hello-web --timeout=180s >/dev/null 2>&1 || true
   sleep 5
   local total failures
-  read -r total failures < <(stop_probe)
+  read -r total failures < <(stop_internal_probe)
   kubectl uncordon "${node}" >/dev/null 2>&1 || true
   DRAINED_NODE=""
   if (( total > 0 && failures == 0 )); then
-    record PASS drain-survival "node ${node} drained; ${total} requests, 0 failures"
+    record PASS drain-survival "node ${node} drained; ${total} internal requests, 0 failures"
   else
-    record FAIL drain-survival "${failures}/${total} requests failed during the drain"
+    record FAIL drain-survival "${failures}/${total} internal requests failed during the drain"
   fi
 }
 
 check_rolling_deploy() {
   log "08 — zero-downtime rolling deploy"
-  if [[ -z "${EXTERNAL_IP}" ]]; then
-    record SKIP rolling-deploy "needs the external gateway serving (run after 05)"; return
+  if [[ -z "${INTERNAL_IP}" || -z "${INTERNAL_HOSTS[0]:-}" ]]; then
+    record SKIP rolling-deploy "needs the internal gateway serving (run after 06)"; return
   fi
-  start_probe
-  kubectl -n public-services rollout restart deploy/hello-web >/dev/null
-  if ! kubectl -n public-services rollout status deploy/hello-web --timeout=240s >/dev/null; then
-    read -r _ _ < <(stop_probe)
+  start_internal_probe             # a rollout recreates pods, not nodes — no node to exclude
+  kubectl -n "${PROBE_NS}" rollout restart deploy/hello-web >/dev/null
+  if ! kubectl -n "${PROBE_NS}" rollout status deploy/hello-web --timeout=240s >/dev/null; then
+    stop_internal_probe >/dev/null
     record FAIL rolling-deploy "rollout did not complete"; return
   fi
   sleep 5
   local total failures
-  read -r total failures < <(stop_probe)
+  read -r total failures < <(stop_internal_probe)
   if (( total > 0 && failures == 0 )); then
-    record PASS rolling-deploy "rolling restart completed; ${total} requests, 0 failures"
+    record PASS rolling-deploy "rolling restart completed; ${total} internal requests, 0 failures"
   else
-    record FAIL rolling-deploy "${failures}/${total} requests failed during the rollout"
+    record FAIL rolling-deploy "${failures}/${total} internal requests failed during the rollout"
   fi
 }
 
@@ -604,6 +645,7 @@ do_cleanup() {
   render "${SCRIPT_DIR}/05-external-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
   render "${SCRIPT_DIR}/06-internal-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
   kubectl -n internal-tools delete pod ingress-test --ignore-not-found 2>/dev/null || true
+  kubectl -n internal-tools delete pod ha-probe --ignore-not-found 2>/dev/null || true
   gcloud iam service-accounts delete "${WI_GSA}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
   gcloud secrets delete "${SECRET_NAME}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
   # On-demand validation backups must not outlive the run (#31 teardown
