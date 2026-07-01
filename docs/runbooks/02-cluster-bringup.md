@@ -275,12 +275,20 @@ both gateways get IP addresses.
 - Public certificates stuck in `PROVISIONING` (not a run failure, but nothing
   serves over HTTPS externally) → you still need the **one-time DNS delegation**
   below.
+- `Backend initialization required` when you run the `terraform output` below →
+  this root isn't initialized locally; run the `terraform … init
+  -backend-config="bucket=${PROJECT_ID}-tf-state"` line first (add `-reconfigure`
+  if it says the backend configuration changed).
 
 **One-time DNS delegation (🧑, required for public HTTPS):** dev has
 `manage_public_dns = true`, so Terraform created a public zone but the domain
 must be delegated to it at your registrar:
 
 ```bash
+# The state lives in GCS, so initialize this root against the backend once
+# (needs your operator ADC — gcloud auth application-default login). Add
+# -reconfigure if a previous local init complains that the backend changed.
+terraform -chdir=terraform/envs/dev/fop init -backend-config="bucket=${PROJECT_ID}-tf-state"
 terraform -chdir=terraform/envs/dev/fop output public_zone_name_servers
 # Add NS records for the public subdomain (host `dev` in `arthos.app`) pointing at
 # those four nameservers. Certificates then go PROVISIONING → ACTIVE in minutes.
