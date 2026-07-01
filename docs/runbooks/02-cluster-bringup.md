@@ -324,15 +324,31 @@ Gateway, the CAS hierarchy, autoscaling bounds, backup plan, DNS zones, and
 active certificates. Run it with **your operator credentials** so every check
 runs in full.
 
-**Run:**
+**Run:** do these four sub-steps **in order, in the same terminal window** — the
+virtual environment and the `export`s only apply to the shell you set them in, so
+`setup-doctor` has to run in that same shell. This also assumes you still have
+`PROJECT_ID`, `PROJECT_NUMBER`, `REGION`, and `ACCOUNT` exported from
+[Set your values once](#set-your-values-once); if you opened a fresh terminal,
+re-run those exports first.
+
+**5a — Sign in with your operator credentials** (interactive; opens a browser —
+finish the sign-in, then return to the terminal):
 
 ```bash
-gcloud auth application-default login   # sign in as $ACCOUNT — NOT a personal account
+gcloud auth application-default login   # sign in as your $ACCOUNT — NOT a personal account
+```
 
+**5b — Install the verifier** (one-time; creates a local `.venv` and installs it):
+
+```bash
 cd bootstrap/verifier
 python3 -m venv .venv && . .venv/bin/activate
 pip install -q -r requirements.lock && pip install -q -e . --no-deps
+```
 
+**5c — Set the values `setup-doctor` reads** (paste the whole block at once):
+
+```bash
 # identity / keyless
 export SETUP_DOCTOR_PROJECT_ID="$PROJECT_ID"
 export SETUP_DOCTOR_PROJECT_NUMBER="$PROJECT_NUMBER"
@@ -350,7 +366,11 @@ export SETUP_DOCTOR_EXTERNAL_HOSTNAMES=app.dev.arthos.app,hello.dev.arthos.app
 export SETUP_DOCTOR_INTERNAL_HOSTNAMES=hello.dev.aifabrik.com,tools.dev.aifabrik.com
 export SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN=dev.aifabrik.com
 export SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN=dev.arthos.app
+```
 
+**5d — Run the audit:**
+
+```bash
 setup-doctor
 ```
 
