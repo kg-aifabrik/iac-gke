@@ -281,7 +281,8 @@ Building a cluster is **choosing coordinates, not writing code**. The three dime
 ```
 modules/cluster-stack/    composes network + supply-chain + gke-cluster + access + private-ca + gateways + dns-zones + gke-backup
 envs/dev/foundation/      the per-project foundation (services, KMS, node SA) — applied once
-envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls the stack
+envs/<env>/<purpose>/     a generated cluster root: reads foundation, calls the stack
+                          (e.g. envs/dev/fop, envs/dev/mgmt)
 ```
 
 - **Why foundation is split out (per project, not per cluster)** — services-enablement, the
@@ -294,19 +295,29 @@ envs/dev/fop/             dev Fleet-Operations-Plane: reads foundation, calls th
   zones** (the region's first three, unless overridden), stamps consistent
   `environment/purpose/cluster` labels, and wires the eight per-purpose modules. The hardening
   inside those modules is identical for every cluster; only the inputs differ.
-- **`envs/dev/fop` is thin** — it pins dev-FOP's shape (`e2-medium`, general pool only,
-  autoscaling 1–2 nodes per zone × 3 zones; `REGULAR` channel + a weekend maintenance window;
-  not deletion-protected because dev is torn down) and supplies only account/identity values.
-  **Adding a purpose** = a sibling folder like this one with a different `purpose` and sizing.
+- **The roots are generated, not hand-written (ADR-0009).** `config/clusters.yaml` is the
+  single source of truth — per-`(env,purpose)` shape/sizing as data, merged
+  defaults → env → purpose → cluster override. The `tools/cluster-factory` generator renders
+  each active cluster's thin root from it: `envs/dev/fop` pins dev-FOP's shape (`e2-medium`,
+  general pool, autoscaling 1–2 nodes/zone × 3 zones; `REGULAR` channel + a weekend window; not
+  deletion-protected) with only the account/identity values left as variables. Roots are
+  **normalized and committed** (like lockfiles); regenerating an existing cluster is a
+  `terraform plan` no-op (its module inputs don't change).
+- **Adding a purpose** = add it under `purposes:` and `clusters:` in `config/clusters.yaml`,
+  then run [`bootstrap/add-cluster-purpose.sh`](../../bootstrap/add-cluster-purpose.sh). That
+  renders the new root **and** regenerates the pipeline's `env`/`purpose` input lists from the
+  registry (kept in sync via sentinel-marked regions). `env` is a fixed set (`dev`/`stage`/`prod`);
+  `purpose` is the open axis. CI guards drift with `cluster-factory generate --check`.
 - **Account stays out of git** — the state-bucket name and project id are supplied at
   `init`/apply (`-backend-config`, `terraform.tfvars` (git-ignored), or `TF_VAR_*`), never
-  committed. Each root keeps its own state under a prefix: `env/dev/foundation`, `env/dev/fop`.
+  committed. Each root keeps its own state under a prefix: `env/<env>/foundation`,
+  `env/<env>/<purpose>` (e.g. `env/dev/fop`, `env/dev/mgmt`).
 
 State backend (per root):
 
 ```bash
-terraform -chdir=terraform/envs/dev/foundation init -backend-config="bucket=<project>-tf-state"
-terraform -chdir=terraform/envs/dev/fop        init -backend-config="bucket=<project>-tf-state"
+terraform -chdir=terraform/envs/dev/foundation  init -backend-config="bucket=<project>-tf-state"
+terraform -chdir=terraform/envs/<env>/<purpose> init -backend-config="bucket=<project>-tf-state"
 ```
 
 **Provider dependency locks (`.terraform.lock.hcl`).** The lock pins the exact provider
@@ -323,7 +334,11 @@ version. Two rules keep it trustworthy, learned from a drift that broke a teardo
   Terraform — `linux_amd64` (CI) and developer Macs (`darwin_amd64`, `darwin_arm64`) —
   produced with `terraform providers lock -platform=linux_amd64 -platform=darwin_amd64
   -platform=darwin_arm64`. A lock holding only one platform's hash (e.g. a Mac-generated
-  lock) makes CI either silently re-resolve, losing the pin, or fail outright.
+  lock) makes CI either silently re-resolve, losing the pin, or fail outright. Because the
+  roots are generated, the factory keeps **one** canonical lock at
+  `tools/cluster-factory/src/cluster_factory/templates/terraform.lock.hcl` and copies it into
+  every root, so all clusters pin identically — refresh providers by updating that one file
+  and regenerating.
 
 CI enforces both: every workflow's `init` runs with `-lockfile=readonly`, so a lock that is
 missing, single-platform, or stale **fails the run** instead of being rewritten on the
@@ -338,19 +353,26 @@ A change to a cluster is a reviewed change, never a console click. All three wor
 authenticate **keyless** (Workload Identity Federation — no stored keys) and read
 account-specific values from repository variables, so nothing project-specific is in git.
 
-- **`terraform-plan` (preview)** — runs on every PR touching `terraform/`. It plans both dev
-  roots and **posts the plan to the PR** (one collapsible, self-updating comment per root) and
-  uploads the saved plan as an artifact. This is the reviewer's diff.
-- **`terraform-apply` (gated, saved plan)** — manually dispatched for one root. The run
-  **plans, then waits on the `dev` GitHub Environment** whose *required reviewers are the SRE
-  approver list*; the apply job is blocked until one of them approves. It then applies the
-  **saved plan from the same run**, so what is applied is exactly what was approved. For the
-  `fop` root it finishes by applying the in-cluster platform manifests over Connect Gateway
-  (with a short retry for IAM propagation). Concurrency serializes applies per root and never
-  cancels one mid-flight.
-- **`terraform-destroy` (gated)** — manually dispatched, requires re-typing the root name to
-  confirm, and goes through the same `dev` Environment approval. Tears down the short-lived
-  dev cluster after verification. (Destroying `foundation` leaves the KMS key ring/key behind —
+All three take an `env` + `purpose` selector (`TF_ROOT = terraform/envs/<env>/<purpose>`);
+`foundation` is offered as a special `purpose`. The `purpose` choice list and the plan matrix
+are **generated from the registry** (sentinel-marked regions, kept current by the prime
+script), so the dispatch menu can't offer a cluster that has no root. `env` today is wired
+only for `dev` (stage/prod are modeled but unbuilt — ADR-0009).
+
+- **`terraform-plan` (preview)** — runs on every PR touching `terraform/`. Its matrix plans
+  every `(env, purpose)` root the registry declares (each env's `foundation` + each cluster)
+  and **posts the plan to the PR** (one collapsible, self-updating comment per root), uploading
+  each saved plan as an artifact. This is the reviewer's diff.
+- **`terraform-apply` (gated, saved plan)** — manually dispatched for one `(env, purpose)`. The
+  run **plans, then waits on the `dev` GitHub Environment** whose *required reviewers are the SRE
+  approver list*; the apply job is blocked until one approves. It then applies the **saved plan
+  from the same run**, so what is applied is exactly what was approved. For any cluster purpose
+  (i.e. not `foundation`) it finishes by applying the in-cluster platform manifests over Connect
+  Gateway (with a short retry for IAM propagation). Concurrency serializes applies per
+  `(env, purpose)` and never cancels one mid-flight.
+- **`terraform-destroy` (gated)** — manually dispatched, requires re-typing the `purpose` to
+  confirm, and goes through the same `dev` Environment approval. Tears down a short-lived
+  cluster after verification. (Destroying `foundation` leaves the KMS key ring/key behind —
   Cloud KMS forbids deletion — so a later apply reuses them.)
 
 **One-time setup an operator must do** (beyond the Milestone 0 keyless-access runbook):

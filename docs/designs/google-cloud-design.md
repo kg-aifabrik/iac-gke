@@ -429,6 +429,7 @@ capture Kubernetes state *and* volume data together.
 - **Regional persistent disk as a second named class, not the default** — zone-survivable storage for the workloads that need it, without taxing the ones that don't.
 - **Multi-host gateways, no wildcard certs** — per-host public certs picked by SNI; one explicit multi-SAN CAS leaf internally.
 - **Cloud DNS private zone for internal names; public DNS manual with an opt-in zone** — internal resolution is platform-owned; no in-cluster DNS controller.
+- **Cluster purposes expand by config, not new code (ADR-0009)** — a registry (`config/clusters.yaml`) plus the `tools/cluster-factory` generator renders each per-`(env,purpose)` Terraform root and regenerates the pipeline's `env`/`purpose` inputs; adding a purpose is a config edit followed by `bootstrap/add-cluster-purpose.sh`. `env` is a fixed set (`dev`/`stage`/`prod`); `purpose` is the open axis.
 
 ## 12. Open items
 
@@ -456,3 +457,5 @@ CAS root). Still open:
 ## 13. Related
 
 [requirements.md](../requirements.md) · [technology-choices.md](../technology-choices.md) · [security-requirements.md](../security-requirements.md).
+
+Decision records: [`docs/adr/`](../adr/) — notably [ADR-0009](../adr/0009-cluster-purpose-expansion.md) (cluster purpose-expansion) and its [TDR](cluster-purpose-expansion.md).

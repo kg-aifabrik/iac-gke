@@ -17,10 +17,12 @@ The commands below use placeholders that you replace with your cluster's values:
   example `fop`).
 - `<PROJECT_ID>`, `<region>`, and the hostname and zone values for your cluster.
 
-> **What the pipeline supports today:** the workflows currently accept only the
-> `dev` environment and the `foundation` and `fop` roots. Other environments and
-> purposes are not wired up yet — substitute the placeholders accordingly as they
-> come online.
+> **What the pipeline supports today:** `env` is wired only for `dev` (stage/prod
+> are modeled but not built). The `purpose` choices are generated from
+> `config/clusters.yaml` — currently `foundation`, `fop`, and `mgmt`. To add a
+> **new** purpose, first edit the registry and run
+> [`bootstrap/add-cluster-purpose.sh`](../../bootstrap/add-cluster-purpose.sh),
+> then follow this runbook to build it.
 
 This runbook assumes the keyless access setup is already done. If you haven't run
 it yet, do [`01-keyless-access-setup.md`](01-keyless-access-setup.md) first.
