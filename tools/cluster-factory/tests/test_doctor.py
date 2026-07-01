@@ -64,3 +64,24 @@ def test_as_shell_exports_escapes_single_quotes():
     # A value with a single quote must not break out of the quoting.
     line = doctor.as_shell_exports({"X": "a'b"})
     assert line == "export X='a'\\''b'"
+
+
+def test_expected_cluster_roles_is_build_roles_plus_access_module_roles():
+    roles = doctor.expected_cluster_roles(REPO_ROOT).split(",")
+    # Single-sourced from verify-access.yml ...
+    assert "roles/container.admin" in roles
+    assert "roles/serviceusage.serviceUsageAdmin" in roles
+    # ... plus the roles the access module grants at cluster-apply.
+    assert "roles/gkehub.gatewayEditor" in roles
+    assert "roles/gkehub.viewer" in roles
+    # Sorted + de-duplicated.
+    assert roles == sorted(set(roles))
+
+
+def test_doctor_env_includes_expected_roles_only_when_provided():
+    data = load(REGISTRY_PATH)
+    kwargs = dict(project_id="p", project_number="1", region="r", repository_id="9")
+    with_roles = doctor.doctor_env(data, "dev", "fop", expected_roles="roles/a,roles/b", **kwargs)
+    without = doctor.doctor_env(data, "dev", "fop", **kwargs)
+    assert with_roles["SETUP_DOCTOR_EXPECTED_ROLES"] == "roles/a,roles/b"
+    assert "SETUP_DOCTOR_EXPECTED_ROLES" not in without

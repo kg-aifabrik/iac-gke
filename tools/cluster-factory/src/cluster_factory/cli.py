@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from cluster_factory.doctor import as_shell_exports, doctor_env
+from cluster_factory.doctor import as_shell_exports, doctor_env, expected_cluster_roles
 from cluster_factory.registry import RegistryError, load
 from cluster_factory.render import TerraformMissingError, generate
 from cluster_factory.workflows import WorkflowMarkerError
@@ -83,7 +83,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor_env(args: argparse.Namespace) -> int:
-    _, registry = _registry_path(args)
+    repo_root, registry = _registry_path(args)
     try:
         data = load(registry)
         env_map = doctor_env(
@@ -92,6 +92,7 @@ def _cmd_doctor_env(args: argparse.Namespace) -> int:
             project_number=args.project_number,
             region=args.region,
             repository_id=args.repository_id,
+            expected_roles=expected_cluster_roles(repo_root),
         )
     except (RegistryError, FileNotFoundError) as exc:
         print(f"cluster-factory: {exc}", file=sys.stderr)

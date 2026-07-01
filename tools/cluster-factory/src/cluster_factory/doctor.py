@@ -14,7 +14,10 @@ from the keyless (`cluster-ctrl-automation`) and foundation (`gke-node`) setups.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from cluster_factory.registry import effective_config
 
@@ -24,6 +27,55 @@ PROVIDER_ID = "iac-gke"
 REF = "refs/heads/main"
 AUTOMATION_SA_ID = "cluster-ctrl-automation"
 NODE_SA_ID = "gke-node"
+
+# Roles the access module grants the automation SA at cluster-apply time (so a
+# BUILT cluster's SA holds these on top of the build roles). Kept here because
+# they're only present once a cluster exists — see runbook 02 step 1.
+ACCESS_MODULE_ROLES = ("roles/gkehub.gatewayEditor", "roles/gkehub.viewer")
+
+# The build-role set is single-sourced from the keyless verifier workflow, so we
+# don't maintain a second copy that could drift.
+_VERIFY_WORKFLOW = ".github/workflows/verify-access.yml"
+_EXPECTED_ROLES_KEY = "SETUP_DOCTOR_EXPECTED_ROLES"
+
+
+def _find_key(obj: Any, key: str) -> Any:
+    """Depth-first search for ``key`` anywhere in a nested dict/list; None if absent."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                return v
+            found = _find_key(v, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_key(item, key)
+            if found is not None:
+                return found
+    return None
+
+
+def expected_cluster_roles(repo_root: str | Path) -> str:
+    """The automation SA's expected project roles for a **built** cluster.
+
+    Reads the build-role set from ``verify-access.yml`` (its
+    ``SETUP_DOCTOR_EXPECTED_ROLES`` — the single source of truth) and adds the
+    roles the access module grants at cluster-apply. Returns a sorted,
+    comma-joined string, or ``""`` if the workflow can't be read (so callers can
+    simply omit the variable rather than assert a wrong set).
+    """
+    path = Path(repo_root) / _VERIFY_WORKFLOW
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return ""
+    raw = _find_key(data, _EXPECTED_ROLES_KEY)
+    if not raw:
+        return ""
+    roles = {r.strip() for r in str(raw).split(",") if r.strip()}
+    roles.update(ACCESS_MODULE_ROLES)
+    return ",".join(sorted(roles))
 
 
 def _csv(value: Any) -> str:
@@ -42,17 +94,20 @@ def doctor_env(
     project_number: str,
     region: str,
     repository_id: str,
+    expected_roles: str = "",
 ) -> dict[str, str]:
     """Return the ``SETUP_DOCTOR_*`` variables for one cluster as a mapping.
 
     Per-cluster values are resolved from the registry; identity/account values are
-    taken from the arguments and the naming conventions. Raises
+    taken from the arguments and the naming conventions. ``expected_roles`` (from
+    :func:`expected_cluster_roles`) drives the least-privilege check and is
+    included only when non-empty. Raises
     :class:`cluster_factory.registry.RegistryError` via ``effective_config`` if the
     cluster is malformed.
     """
     cfg = effective_config(data, env, purpose)
     asg = cfg.get("general_autoscaling") or {}
-    return {
+    env_map = {
         "SETUP_DOCTOR_PROJECT_ID": project_id,
         "SETUP_DOCTOR_PROJECT_NUMBER": str(project_number),
         "SETUP_DOCTOR_POOL_ID": POOL_ID,
@@ -71,6 +126,9 @@ def doctor_env(
         "SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN": _csv(cfg.get("internal_zone_domain")),
         "SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN": _csv(cfg.get("public_zone_domain")),
     }
+    if expected_roles:
+        env_map["SETUP_DOCTOR_EXPECTED_ROLES"] = expected_roles
+    return env_map
 
 
 def as_shell_exports(env_map: dict[str, str]) -> str:
