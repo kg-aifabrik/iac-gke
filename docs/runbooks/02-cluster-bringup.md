@@ -2,8 +2,9 @@
 
 This runbook takes you through a Google Kubernetes Engine (GKE) cluster end to
 end: build it through the pipeline, verify its security controls and workloads,
-then tear it down cleanly. It is written for the common case — the **`dev` `fop`**
-cluster — with concrete, copy-paste commands.
+clean up the test setup, and — if this was a test — optionally tear the cluster
+down. It is written for the common case — the **`dev` `fop`** cluster — with
+concrete, copy-paste commands.
 
 Each step is laid out the same way: **what it does**, the **commands to run**,
 **what success looks like**, **what failures mean**, and a collapsible
@@ -491,15 +492,56 @@ confirmed; close the issue(s).
 
 ---
 
-## 8. Tear down 🤖 (gated)
+## 8. Clean up the validate.sh test setup 🧑 (required after validation)
 
-**What this does:** destroys the cluster and leaves zero billable resources.
-Normally you tear down the cluster (`fop`), not the foundation.
+**What this does:** removes the throwaway scaffolding `validate.sh` created — the
+`examples` namespace and its workloads, the Workload Identity service account +
+secret, the in-cluster ingress example objects, any on-demand validation
+backups/restores, and it re-admits any node a failed run left cordoned. Run it
+after every `validate.sh` run so nothing lingers on the cluster or in the project.
 
 **Run:**
 
 ```bash
-examples/validate.sh --cleanup                # 🧑 first: remove throwaway test scaffolding
+examples/validate.sh --cleanup
+```
+
+**Success looks like:** the command finishes without error; `kubectl -n examples
+get all` returns nothing, and the `wi-demo` service account / `cluster-ctrl-example`
+secret are gone. Safe to re-run (idempotent).
+
+**If it fails:**
+
+- Partial teardown / transient errors → just re-run it; every deletion is
+  best-effort and idempotent.
+- `kubectl` can't reach the cluster → refresh Connect Gateway credentials
+  (`gcloud container fleet memberships get-credentials dev-fop --project "$PROJECT_ID"`).
+
+<details><summary>Technical details</summary>
+
+`--cleanup` resolves the cluster config, connects over Connect Gateway, then
+deletes: the `examples` namespace; the case-05/06 ingress objects (which live in
+the platform namespaces `public-services` / `internal-tools`, so the objects are
+removed but the namespaces are left to the cluster stack); the leftover
+`ingress-test` and `ha-probe` pods; the Workload Identity service account and the
+Secret Manager secret; and every `val-*` on-demand backup and restore (so
+validation backups never outlive the run, #31). It also uncordons any node left
+`unschedulable` by a drain/zone-failover case. It is a standalone mode — you can
+run it any time after a validation, not only as part of a teardown.
+</details>
+
+---
+
+## 9. Tear down the cluster 🤖 (gated, optional)
+
+**What this does:** destroys the cluster. This step is **optional** — do it only
+if this run was a **test** (or you are otherwise done with the cluster); a real,
+in-use cluster stays up. You tear down the cluster (`fop`) and leave the
+per-project foundation in place.
+
+**Run:**
+
+```bash
 gh workflow run terraform-destroy.yml -f env=dev -f purpose=fop -f confirm=fop
 gh run watch                                  # then approve in the dev Environment
 ```
