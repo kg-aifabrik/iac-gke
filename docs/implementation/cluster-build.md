@@ -307,7 +307,9 @@ envs/<env>/<purpose>/     a generated cluster root: reads foundation, calls the 
   then run [`bootstrap/add-cluster-purpose.sh`](../../bootstrap/add-cluster-purpose.sh). That
   renders the new root **and** regenerates the pipeline's `env`/`purpose` input lists from the
   registry (kept in sync via sentinel-marked regions). `env` is a fixed set (`dev`/`stage`/`prod`);
-  `purpose` is the open axis. CI guards drift with `cluster-factory generate --check`.
+  `purpose` is the open axis. Guard drift by running `cluster-factory generate
+  --check` (via `bootstrap/add-cluster-purpose.sh --check`) — wiring that into CI
+  is future work (Day-2 backlog).
 - **Account stays out of git** — the state-bucket name and project id are supplied at
   `init`/apply (`-backend-config`, `terraform.tfvars` (git-ignored), or `TF_VAR_*`), never
   committed. Each root keeps its own state under a prefix: `env/<env>/foundation`,
