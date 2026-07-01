@@ -24,10 +24,18 @@ This runbook assumes the keyless access setup is already done. If not, do
 Every step uses these. Export them in your shell before you start:
 
 ```bash
-export PROJECT_ID=gke-poc-498602      # your dev Google Cloud project
+export PROJECT_ID=gke-poc-498602      # your Google Cloud Project ID (alphanumeric)
+export PROJECT_NUMBER=248272574639    # your Google Cloud Project Number (all numeric — a different identifier from the ID)
 export REGION=us-central1             # cluster region
 export ACCOUNT=you@aifabrik.com       # your operator Google account (NOT a personal one)
 ```
+
+The **Project ID** (alphanumeric, e.g. `gke-poc-498602`) and the **Project
+Number** (all numeric, e.g. `248272574639`) are two *different* Google Cloud
+identifiers, and the automation needs both — the service-account emails and
+`--project` flags use the **ID**, while `setup-doctor` and the Workload Identity
+provider use the **Number**. Find both on the Google Cloud console home page, or
+run `gcloud projects describe "$PROJECT_ID" --format='value(projectId, projectNumber)'`.
 
 These are account-specific and never committed. The cluster's coordinates are
 shown concretely as `env=dev` and `purpose=fop`; to build a different cluster,
@@ -88,15 +96,33 @@ already in place and changes nothing.
 
 <details><summary>Technical details</summary>
 
-Creates the versioned GCS state bucket and elevates the automation service
-account (`cluster-ctrl-automation@${PROJECT_ID}.iam.gserviceaccount.com`) from
-its single Milestone-0 read role to the build role set (listed in the bootstrap
-section of [`../implementation/cluster-build.md`](../implementation/cluster-build.md)),
-plus `roles/gkehub.gatewayEditor` and `roles/gkehub.viewer` (the access module
-grants those too). After running, keep the keyless verifier green by re-syncing
-its expected roles: edit `.github/workflows/verify-access.yml` →
-`SETUP_DOCTOR_EXPECTED_ROLES` to the build role set **plus** those two gkehub
-roles, so its exact-match check doesn't flag them as unexpected.
+This step does two things, both of which need elevated (human) privileges the
+automation deliberately lacks:
+
+- **Creates the Terraform state bucket** — `gs://${PROJECT_ID}-tf-state`, with
+  object versioning enabled so state history is recoverable. Every root stores
+  its state in this one bucket under a distinct prefix (`env/dev/foundation`,
+  `env/dev/fop`, and so on), which is why the bucket must exist before any apply.
+- **Elevates the automation service account** —
+  `cluster-ctrl-automation@${PROJECT_ID}.iam.gserviceaccount.com` is promoted
+  from the single read-only role it got at keyless setup to the least-privilege
+  **build** role set it needs to create clusters, networks, KMS grants, and the
+  rest (the exact roles are in the bootstrap section of
+  [`../implementation/cluster-build.md`](../implementation/cluster-build.md)). It
+  also receives `roles/gkehub.gatewayEditor` and `roles/gkehub.viewer`, which the
+  access module relies on for Connect Gateway.
+
+After running it once, reconcile the keyless verifier so it stays green. The
+`verify-access` workflow checks that the service account holds *exactly* an
+expected set of roles, so the newly-granted build roles read as "unexpected"
+until you declare them:
+
+- Edit `.github/workflows/verify-access.yml`.
+- Set `SETUP_DOCTOR_EXPECTED_ROLES` to the build role set **plus**
+  `roles/gkehub.gatewayEditor` and `roles/gkehub.viewer`.
+
+This is a one-time reconciliation — you won't touch it again unless the build
+role set itself changes.
 </details>
 
 ---
@@ -123,9 +149,22 @@ gh api --method PUT "repos/{owner}/{repo}/environments/dev" \
   -F "reviewers[][type]=User" -F "reviewers[][id]=${reviewer_id}"
 ```
 
-**Success looks like:** `gh variable list` shows `GCP_REGION` and
-`SRE_OPERATOR_MEMBERS`; `gh api repos/{owner}/{repo}/environments/dev` returns
-the `dev` environment with your reviewer(s) listed.
+**Success looks like:** `gh api repos/{owner}/{repo}/environments/dev` returns the
+`dev` environment with your reviewer(s) listed, and `gh variable list` shows the
+full set of six variables — for example:
+
+```text
+NAME                  VALUE                                                            UPDATED
+GCP_PROJECT_ID        gke-poc-498602                                                   about 23 hours ago
+GCP_PROJECT_NUMBER    248272574639                                                     about 23 hours ago
+GCP_REGION            us-central1                                                      about 23 hours ago
+SRE_OPERATOR_MEMBERS  ["user:ag@aifabrik.com","user:kg@aifabrik.com"]                  about 13 hours ago
+WIF_PROVIDER          projects/248272574639/locations/global/workloadIdentityPools/…   about 23 hours ago
+WIF_SERVICE_ACCOUNT   cluster-ctrl-automation@gke-poc-498602.iam.gserviceaccount.com   about 23 hours ago
+```
+
+(`GCP_PROJECT_*` and `WIF_*` come from the keyless setup; `GCP_REGION` and
+`SRE_OPERATOR_MEMBERS` are the two you set in this step.)
 
 **If it fails:**
 
@@ -136,12 +175,27 @@ the `dev` environment with your reviewer(s) listed.
 
 <details><summary>Technical details</summary>
 
-Two different identity systems meet here: the Environment **reviewers** are
-**GitHub users** (the approval gate), while **`SRE_OPERATOR_MEMBERS`** are
-**Google Cloud IAM members** who get Connect Gateway access + `cluster-admin`
-RBAC on the cluster. `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `WIF_PROVIDER`, and
-`WIF_SERVICE_ACCOUNT` already exist from the keyless setup; the automation member
-is derived from `WIF_SERVICE_ACCOUNT`.
+Two different identity systems meet in this step; keeping them straight avoids a
+lot of confusion:
+
+- **Environment reviewers are GitHub users.** They are the approval gate — the
+  people GitHub blocks each apply/destroy on until one of them opens the run and
+  clicks *Review deployments → Approve*. You register them with the
+  `reviewers[][id]` call, using each person's numeric GitHub user id (from
+  `gh api users/<login> --jq .id`).
+- **`SRE_OPERATOR_MEMBERS` are Google Cloud IAM members.** They are who may
+  *operate the cluster* — each entry is granted Connect Gateway access and
+  `cluster-admin` Kubernetes RBAC. Entries are `group:<email>` (a Google
+  Workspace / Cloud Identity group) or `user:<email>` (an individual), and you
+  can mix them. A group is easier to run long-term — you change its membership in
+  Google without re-applying Terraform — whereas an explicit user list requires a
+  Terraform apply every time it changes.
+
+The remaining variables — `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `WIF_PROVIDER`,
+and `WIF_SERVICE_ACCOUNT` — already exist from the keyless setup (runbook 01), and
+the pipeline derives its automation member from `WIF_SERVICE_ACCOUNT`. Nothing
+project-specific is committed to git: the workflows read all of it from these
+repository variables at run time.
 </details>
 
 ---
@@ -175,11 +229,21 @@ deployments*), then applies green. `gh run view <id>` shows both jobs ✓.
 
 <details><summary>Technical details</summary>
 
-`TF_ROOT=terraform/envs/dev/foundation`. The run plans, waits on the `dev`
-Environment gate, then applies the **saved plan** so what applies is exactly what
-was reviewed. Concurrency serializes runs per `(env, purpose)`. The KMS key ring
-and key are created here and, once created, are never deleted (Cloud KMS forbids
-it) — a later teardown/rebuild reuses them.
+`TF_ROOT=terraform/envs/dev/foundation`. The run is deliberately two-phase and
+gated:
+
+- **Plan** runs first and uploads the result as a build artifact.
+- **Apply** is held on the `dev` Environment until a required reviewer approves,
+  then it applies that **saved** plan — so what applies is exactly what was
+  reviewed, with no window for drift between the two.
+
+A couple of safety properties come from the workflow itself:
+
+- **Concurrency** serializes runs per `(env, purpose)` and never cancels one in
+  flight, because a cancelled apply can corrupt state.
+- **The KMS key ring and key are permanent.** They are created here and never
+  deleted afterwards — Cloud KMS forbids key deletion — so a later teardown and
+  rebuild reuses the same key rather than creating a new one.
 </details>
 
 ---
@@ -225,15 +289,29 @@ dig NS dev.arthos.app        # expect the Google nameservers
 
 <details><summary>Technical details</summary>
 
-`TF_ROOT=terraform/envs/dev/fop`. After the Terraform apply, the workflow (for
-any `purpose != foundation`) authenticates through Connect Gateway and: applies
-the platform PriorityClasses; Helm-installs the pinned cert-manager (HA),
-trust-manager, and google-cas-issuer (its KSA annotated for Workload Identity);
-then applies the rendered in-cluster manifests with a short retry for gateway-IAM
-propagation. Internal hostnames resolve via the Cloud DNS **private zone** with
-no registrar action; only **public** hostnames need the NS delegation above
-(ADR-0006). After a destroy + re-create, re-check the NS set — a re-created zone
-can get different nameservers.
+`TF_ROOT=terraform/envs/dev/fop`. The Terraform apply builds the cluster and its
+Google-side resources. Then, because the cluster has no public endpoint, the
+workflow reaches it over Connect Gateway and finishes the platform setup in a
+specific order (this whole phase runs for any `purpose != foundation`):
+
+- **PriorityClasses first** — the Helm charts below reference them, and admission
+  rejects pods whose priority class doesn't exist yet.
+- **TLS controllers next**, Helm-installed at pinned versions: cert-manager
+  (highly available — two replicas per component with PodDisruptionBudgets),
+  trust-manager, and google-cas-issuer (its Kubernetes service account annotated
+  for Workload Identity, so it needs no keys).
+- **In-cluster manifests last** — operator RBAC, the encrypted StorageClass, the
+  CAS issuer + root trust bundle, and the two gateways with their routes —
+  applied with a short retry loop to absorb gateway-IAM propagation delay.
+
+DNS behaves differently per exposure class (ADR-0006):
+
+- **Internal** hostnames resolve automatically through the Cloud DNS **private
+  zone** inside the VPC — no registrar action needed.
+- **Public** hostnames need the one-time NS delegation shown above; until the
+  registrar points the subdomain at Cloud DNS, the managed certificates stay
+  `PROVISIONING`. After a destroy + re-create, re-check the nameserver set — a
+  re-created zone can be assigned a different one.
 </details>
 
 ---
@@ -257,7 +335,7 @@ pip install -q -r requirements.lock && pip install -q -e . --no-deps
 
 # identity / keyless
 export SETUP_DOCTOR_PROJECT_ID="$PROJECT_ID"
-export SETUP_DOCTOR_PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+export SETUP_DOCTOR_PROJECT_NUMBER="$PROJECT_NUMBER"
 export SETUP_DOCTOR_POOL_ID=github SETUP_DOCTOR_PROVIDER_ID=iac-gke
 export SETUP_DOCTOR_REPOSITORY_ID="$(gh api repos/kg-aifabrik/iac-gke --jq .id)"
 export SETUP_DOCTOR_REF=refs/heads/main
@@ -293,14 +371,25 @@ policy, CMEK grants, CAS) run in full rather than `[SKIP]`.
 
 <details><summary>Technical details</summary>
 
-`setup-doctor` uses Google APIs only (no `kubectl`). Setting `SETUP_DOCTOR_REGION`
-turns on the cluster-mode checks; leaving it unset runs only the keyless checks.
-It reads identity from Application Default Credentials — the same mechanism that
-caused the early-session 403 when ADC pointed at a personal Gmail. Values here are
-derived from `$PROJECT_ID` and the `dev-fop` entry in `config/clusters.yaml`
-(node SA defaults to `gke-node`, automation SA is `cluster-ctrl-automation`). In
-CI the automation SA is least-privilege, so the operator-only checks `[SKIP]`
-there by design — which is why this step is run locally.
+`setup-doctor` talks only to Google APIs (no `kubectl`), so it can audit the
+cluster's cloud-side posture straight from your laptop. Two behaviours are worth
+knowing:
+
+- **Cluster mode is opt-in via `SETUP_DOCTOR_REGION`.** With it set, the cluster
+  checks run (CMEK grants, node SA, autoscaling, backup plan, DNS zones,
+  certificates, CAS hierarchy); leave it unset and only the keyless/identity
+  checks run.
+- **Identity comes from Application Default Credentials.** That's the same
+  mechanism behind the 403 earlier in setup — if ADC points at a personal Google
+  account with no access to the project, every check 403s. Always run it as your
+  operator account.
+
+The values above are derived from `$PROJECT_ID` / `$PROJECT_NUMBER` and the
+`dev-fop` entry in `config/clusters.yaml` (the node SA defaults to `gke-node`, the
+automation SA is `cluster-ctrl-automation`). In CI the automation service account
+is intentionally least-privilege, so the operator-only structural checks report
+`[SKIP]` there — which is exactly why this full audit is run locally under your
+credentials.
 </details>
 
 ---
@@ -330,11 +419,18 @@ examples/validate.sh          # deploys 13 cases and asserts the outcomes
 
 <details><summary>Technical details</summary>
 
-The full case matrix (what each asserts) is in
-[`examples/README.md`](../../examples/README.md). Ingress cases need the managed
-certs `ACTIVE`; the backup→restore case runs last and bounces the workload
-namespaces. The cluster has no public endpoint, so `kubectl` reaches it only over
-Connect Gateway.
+The full case matrix — what each case asserts — is in
+[`examples/README.md`](../../examples/README.md). A few things to expect while it
+runs:
+
+- **Ingress cases need the managed certificates `ACTIVE`**, so finish the step-4
+  DNS delegation first or those cases fail on HTTPS (the internal cases still
+  pass, since the private CA doesn't depend on the registrar).
+- **The backup→restore case runs last** and deliberately bounces the workload
+  namespaces, so the churn near the end is expected, not a failure.
+- **Access is over Connect Gateway only** — the cluster has no public endpoint, so
+  `kubectl` needs `gke-gcloud-auth-plugin` plus fleet credentials
+  (`gcloud container fleet memberships get-credentials dev-fop --project "$PROJECT_ID"`).
 </details>
 
 ---
@@ -381,10 +477,21 @@ record now points at a released IP and the DNS-authorization CNAME is moot.
 
 <details><summary>Technical details</summary>
 
-`TF_ROOT=terraform/envs/dev/fop`. The destroy deletes the in-cluster Gateways
-before Terraform removes edge resources, so the GKE Gateway controller releases
-its load balancers first (#31). The CAS hierarchy is per-cluster with
-random-suffixed names, so it's removed cleanly and the next apply regenerates
-fresh ids. **Cost while up:** 3–6 × `e2-medium` (autoscaling), two load
-balancers, backups, and the DEVOPS CAS pair — all short-lived.
+`TF_ROOT=terraform/envs/dev/fop`. Order matters on teardown, and the workflow
+handles it for you:
+
+- **In-cluster Gateways are deleted first**, so the GKE Gateway controller
+  releases the Google load balancers it created before Terraform removes the edge
+  resources those depend on. Deleting the cluster first would strand the load
+  balancers and block the destroy (#31); this phase is idempotent, so a re-run
+  after a partial destroy is safe.
+- **The CAS hierarchy is per-cluster** with random-suffixed names, so it's removed
+  cleanly and the next apply generates fresh ids — no name collisions on rebuild.
+- **The foundation is left in place.** A `fop` teardown removes only the cluster;
+  the free, undeletable foundation singletons remain (enabled APIs, the node
+  service account, and the KMS key shell), ready for the next build.
+
+**Cost while the cluster is up:** roughly 3–6 × `e2-medium` nodes (autoscaling),
+two load balancers, backups, and the DEVOPS CAS pair — all short-lived, so a
+prompt teardown keeps dev cheap.
 </details>
