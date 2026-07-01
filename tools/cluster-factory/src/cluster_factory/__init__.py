@@ -15,6 +15,7 @@ from cluster_factory.registry import (
     load,
     validate,
 )
+from cluster_factory.doctor import as_shell_exports, doctor_env
 from cluster_factory.render import TerraformMissingError, cluster_dir, generate
 from cluster_factory.workflows import WorkflowMarkerError, update_workflows
 
@@ -24,7 +25,9 @@ __all__ = [
     "VALID_ENVS",
     "WorkflowMarkerError",
     "active_clusters",
+    "as_shell_exports",
     "cluster_dir",
+    "doctor_env",
     "effective_config",
     "generate",
     "load",

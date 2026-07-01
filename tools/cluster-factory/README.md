@@ -10,10 +10,11 @@ folders. See [ADR-0009](../../docs/adr/0009-cluster-purpose-expansion.md) and th
 
 ```
 src/cluster_factory/
-  registry.py   load + validate + merge the registry (this chunk, C1)
-  render.py     registry -> Terraform roots                 (C2)
-  workflows.py  registry -> workflow input enumerations     (C3)
-  cli.py        the `cluster-factory` command                (C2/C3)
+  registry.py   load + validate + merge the registry
+  render.py     registry -> Terraform roots
+  workflows.py  registry -> workflow input enumerations
+  doctor.py     registry -> SETUP_DOCTOR_* env for the verify step
+  cli.py        the `cluster-factory` command (generate, doctor-env)
 tests/          behavioural tests, one per rule it proves
 ```
 

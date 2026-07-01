@@ -324,12 +324,7 @@ Gateway, the CAS hierarchy, autoscaling bounds, backup plan, DNS zones, and
 active certificates. Run it with **your operator credentials** so every check
 runs in full.
 
-**Run:** do these four sub-steps **in order, in the same terminal window** — the
-virtual environment and the `export`s only apply to the shell you set them in, so
-`setup-doctor` has to run in that same shell. This also assumes you still have
-`PROJECT_ID`, `PROJECT_NUMBER`, `REGION`, and `ACCOUNT` exported from
-[Set your values once](#set-your-values-once); if you opened a fresh terminal,
-re-run those exports first.
+**Run:** two sub-steps — sign in, then run one script.
 
 **5a — Sign in with your operator credentials** (interactive; opens a browser —
 finish the sign-in, then return to the terminal):
@@ -338,40 +333,12 @@ finish the sign-in, then return to the terminal):
 gcloud auth application-default login   # sign in as your $ACCOUNT — NOT a personal account
 ```
 
-**5b — Install the verifier** (one-time; creates a local `.venv` and installs it):
+**5b — Run the audit.** One script installs the verifier, derives every
+`SETUP_DOCTOR_*` value from `config/clusters.yaml` plus your project, and runs the
+full audit — no variables to set by hand:
 
 ```bash
-cd bootstrap/verifier
-python3 -m venv .venv && . .venv/bin/activate
-pip install -q -r requirements.lock && pip install -q -e . --no-deps
-```
-
-**5c — Set the values `setup-doctor` reads** (paste the whole block at once):
-
-```bash
-# identity / keyless
-export SETUP_DOCTOR_PROJECT_ID="$PROJECT_ID"
-export SETUP_DOCTOR_PROJECT_NUMBER="$PROJECT_NUMBER"
-export SETUP_DOCTOR_POOL_ID=github SETUP_DOCTOR_PROVIDER_ID=iac-gke
-export SETUP_DOCTOR_REPOSITORY_ID="$(gh api repos/kg-aifabrik/iac-gke --jq .id)"
-export SETUP_DOCTOR_REF=refs/heads/main
-export SETUP_DOCTOR_SERVICE_ACCOUNT="cluster-ctrl-automation@${PROJECT_ID}.iam.gserviceaccount.com"
-# cluster mode (REGION set = cluster checks on)
-export SETUP_DOCTOR_REGION="$REGION"
-export SETUP_DOCTOR_ENVIRONMENT=dev
-export SETUP_DOCTOR_CLUSTER=dev-fop
-export SETUP_DOCTOR_NODE_SERVICE_ACCOUNT="gke-node@${PROJECT_ID}.iam.gserviceaccount.com"
-export SETUP_DOCTOR_AUTOSCALING_MIN=1 SETUP_DOCTOR_AUTOSCALING_MAX=2
-export SETUP_DOCTOR_EXTERNAL_HOSTNAMES=app.dev.arthos.app,hello.dev.arthos.app
-export SETUP_DOCTOR_INTERNAL_HOSTNAMES=hello.dev.aifabrik.com,tools.dev.aifabrik.com
-export SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN=dev.aifabrik.com
-export SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN=dev.arthos.app
-```
-
-**5d — Run the audit:**
-
-```bash
-setup-doctor
+./bootstrap/verify-cluster.sh --project "$PROJECT_ID" --env dev --purpose fop
 ```
 
 **Success looks like:** every check reports `[PASS]`; the run ends
@@ -391,25 +358,60 @@ policy, CMEK grants, CAS) run in full rather than `[SKIP]`.
 
 <details><summary>Technical details</summary>
 
-`setup-doctor` talks only to Google APIs (no `kubectl`), so it can audit the
-cluster's cloud-side posture straight from your laptop. Two behaviours are worth
+**What `verify-cluster.sh` does.** It is a thin wrapper that removes the manual
+setup; in order it:
+
+- Checks the prerequisites — `python3`, `gcloud`, `gh`, and that Application
+  Default Credentials exist (it stops with a clear message if you haven't run
+  `gcloud auth application-default login`).
+- Installs the verifier and the factory into a local virtual environment
+  (`bootstrap/verifier/.venv`) from their pinned lockfiles.
+- Resolves the two non-registry identifiers — the **project number** (via
+  `gcloud projects describe`) and the **repository id** (via `gh`).
+- Asks the factory to derive the rest from the registry:
+  `cluster-factory doctor-env` reads the cluster's entry in
+  `config/clusters.yaml` and prints the `SETUP_DOCTOR_*` values (cluster name,
+  autoscaling bounds, ingress hostnames, DNS zones), which the script evaluates.
+- Runs `setup-doctor` with all of that in the environment.
+
+Because the per-cluster values come from the same registry the cluster was built
+from, the audit can't drift from the build.
+
+**How `setup-doctor` itself behaves.** It talks only to Google APIs (no
+`kubectl`), so it audits the cloud-side posture from your laptop. Two things worth
 knowing:
 
 - **Cluster mode is opt-in via `SETUP_DOCTOR_REGION`.** With it set, the cluster
   checks run (CMEK grants, node SA, autoscaling, backup plan, DNS zones,
-  certificates, CAS hierarchy); leave it unset and only the keyless/identity
-  checks run.
+  certificates, CAS hierarchy); without it, only the keyless/identity checks run.
 - **Identity comes from Application Default Credentials.** That's the same
-  mechanism behind the 403 earlier in setup — if ADC points at a personal Google
-  account with no access to the project, every check 403s. Always run it as your
-  operator account.
+  mechanism behind the 403 earlier in setup — if ADC points at a personal account
+  with no project access, every check 403s. Always run it as your operator
+  account. In CI the automation service account is intentionally least-privilege,
+  so the operator-only structural checks report `[SKIP]` there — which is exactly
+  why this full audit is run locally under your credentials.
 
-The values above are derived from `$PROJECT_ID` / `$PROJECT_NUMBER` and the
-`dev-fop` entry in `config/clusters.yaml` (the node SA defaults to `gke-node`, the
-automation SA is `cluster-ctrl-automation`). In CI the automation service account
-is intentionally least-privilege, so the operator-only structural checks report
-`[SKIP]` there — which is exactly why this full audit is run locally under your
-credentials.
+**Running it by hand (debugging, or a one-off check).** If you'd rather set the
+variables yourself — for instance to tweak one and re-run a single check — install
+the verifier and export the values `verify-cluster.sh` would have derived, then
+run `setup-doctor` directly:
+
+```bash
+cd bootstrap/verifier
+python3 -m venv .venv && . .venv/bin/activate
+pip install -q -r requirements.lock && pip install -q -e . --no-deps
+
+# Print the exact exports for this cluster, then eval them (needs cluster-factory
+# installed too: pip install -q -e ../../tools/cluster-factory):
+eval "$(cluster-factory doctor-env --env dev --purpose fop \
+  --project "$PROJECT_ID" --project-number "$PROJECT_NUMBER" \
+  --region "$REGION" --repository-id "$(gh api repos/kg-aifabrik/iac-gke --jq .id)")"
+
+setup-doctor
+```
+
+Everything must be in one shell — the virtual environment and the `export`s only
+apply to the shell you set them in.
 </details>
 
 ---
