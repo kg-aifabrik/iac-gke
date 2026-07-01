@@ -439,6 +439,10 @@ autoscaling, HPA, regional-PD zone failover, preemption, and backup→restore.
 **Run:**
 
 ```bash
+# validate.sh reads the cluster's config from the fop Terraform outputs, so
+# initialize that root against its GCS backend once (needs ADC; add -reconfigure
+# if a previous local init complains that the backend changed).
+terraform -chdir=terraform/envs/dev/fop init -backend-config="bucket=${PROJECT_ID}-tf-state"
 examples/validate.sh          # deploys 13 cases and asserts the outcomes
 ```
 
@@ -447,6 +451,10 @@ examples/validate.sh          # deploys 13 cases and asserts the outcomes
 
 **If it fails:**
 
+- `could not resolve REGISTRY_PROXY` / `CLUSTER` → the `fop` root isn't
+  initialized locally, so `terraform output` returns nothing. Run the
+  `terraform … init -backend-config="bucket=${PROJECT_ID}-tf-state"` line above
+  (add `-reconfigure` if it says the backend configuration changed).
 - Ingress cases fail on HTTPS → the managed certs aren't `ACTIVE` yet (finish the
   step-4 DNS delegation; internal-only cases still pass).
 - `kubectl` can't reach the cluster / auth errors → you need
