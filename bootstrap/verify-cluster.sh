@@ -85,7 +85,9 @@ python -m pip install --quiet -e "${FACTORY_DIR}" --no-deps
 # ---------------------------------------------------------------------------
 info "Resolving ${ENV}-${PURPOSE} in ${PROJECT} ..."
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT}" --format='value(projectNumber)')" \
-  || die "cannot read project '${PROJECT}' (does it exist and can you access it?)"
+  || die "cannot read project '${PROJECT}'. Check it exists and you can access it; if
+gcloud says 'Reauthentication required', your gcloud CLI login (separate from ADC)
+has lapsed — run: gcloud auth login"
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)" || die "could not detect the GitHub repo"
 REPOSITORY_ID="$(gh api "repos/${REPO}" --jq .id)" || die "could not read repository id for ${REPO}"
 

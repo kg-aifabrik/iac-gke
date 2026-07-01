@@ -341,6 +341,12 @@ finish the sign-in, then return to the terminal):
 gcloud auth application-default login   # sign in as your $ACCOUNT — NOT a personal account
 ```
 
+> This sets up **Application Default Credentials (ADC)**, which `setup-doctor`
+> reads. The script also runs a `gcloud` CLI command (a project lookup), which
+> uses your **separate** `gcloud` CLI login — if it reports *"Reauthentication
+> required"*, run `gcloud auth login` as well (same account). The two credentials
+> are independent, so both must be current.
+
 **5b — Run the audit.** One script installs the verifier, derives every
 `SETUP_DOCTOR_*` value from `config/clusters.yaml` plus your project, and runs the
 full audit — no variables to set by hand:
