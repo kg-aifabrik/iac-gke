@@ -317,9 +317,13 @@ GKE-specific (below); the on-prem equivalents are built with that cluster.
   - **Internal** — one **multi-SAN** CAS-issued certificate carrying every internal hostname
     as an explicit Subject Alternative Name, written to a single Secret the listener
     terminates with; cert-manager reissues it automatically when a name is added.
-  - Listeners match all attached hostnames; which routes may attach stays gated by the
-    namespace label (`ingress=external|internal`). Per-hostname route ownership inside the
-    allowed namespaces is a multi-tenancy control that arrives with the namespace stamps
+  - Listeners match all attached hostnames; which routes may attach to the **HTTPS**
+    listener stays gated by the namespace label (`ingress=external|internal`). The **HTTP**
+    (port 80) listener instead admits routes only from the gateway's **own namespace**
+    (`from: Same`) — it exists solely for the HTTP→HTTPS redirect route that lives there,
+    and the label gate would reject it (the gateway namespace cannot carry both gateways'
+    values of the shared `ingress` key). Per-hostname route ownership inside the allowed
+    namespaces is a multi-tenancy control that arrives with the namespace stamps
     (security milestone).
 - **Internal endpoints use a private certificate authority in Certificate Authority Service
   (CAS).** Internal hostnames are **private and are not published to Certificate Transparency

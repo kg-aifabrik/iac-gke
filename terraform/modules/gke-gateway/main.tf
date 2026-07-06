@@ -38,10 +38,16 @@ locals {
       addresses        = [{ type = "NamedAddress", value = local.address_name }]
       listeners = [
         {
+          # The http listener exists ONLY for the HTTP->HTTPS redirect route,
+          # which lives in the gateway's own namespace — so it admits routes
+          # from "Same", not the workload-label Selector below. (The Selector
+          # here rejected the module's own redirect route, GWCER104: the
+          # gateway namespace carries no ingress label — and cannot carry
+          # both gateways' values, which share the `ingress` key.)
           name          = "http"
           protocol      = "HTTP"
           port          = 80
-          allowedRoutes = { namespaces = { from = "Selector", selector = { matchLabels = local.route_label } } }
+          allowedRoutes = { namespaces = { from = "Same" } }
         },
         merge(
           {

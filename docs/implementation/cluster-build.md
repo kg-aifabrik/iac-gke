@@ -399,8 +399,11 @@ multi-doc YAML (`incluster_manifests`):
   synchronously replicated across two zones — survives a zone failure at ~2× disk cost,
   ADR-0008). Neither is marked the cluster default (to avoid duelling with GKE's
   `standard-rwo`); workloads opt in by name.
-- **Platform namespaces** — `gateway-system` plus the workload namespaces, each labelled so its
-  HTTPRoutes may attach to the matching gateway (`ingress=external|internal`).
+- **Platform namespaces** — the workload namespaces, each labelled so its HTTPRoutes may
+  attach to the matching gateway's HTTPS listener (`ingress=external|internal`), plus
+  `gateway-system`, which carries no ingress label: it hosts the gateways and their
+  HTTP→HTTPS redirect routes, which attach via the http listener's own-namespace rule
+  (`from: Same`) instead.
 - **PriorityClasses (design §5)** — three shared tiers (`platform-critical` / `workload-high` /
   `workload-default`), none `globalDefault`. Applied **before** the Helm add-ons (separate
   `priorityclass_manifests` output) because admission rejects pods whose priorityClassName
