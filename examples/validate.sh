@@ -16,9 +16,11 @@
 # unless overridden by environment variables.
 #
 # Usage:
-#   ./validate.sh            # deploy + assert + (on success) auto-clean
-#   ./validate.sh --keep     # as above, but leave resources behind for inspection
-#   ./validate.sh --cleanup  # only tear down (namespace + WI scaffolding)
+#   ./validate.sh                        # deploy + assert + (on success) auto-clean
+#   ./validate.sh --keep                 # as above, but leave resources behind for inspection
+#   ./validate.sh --cleanup              # only tear down (namespace + WI scaffolding)
+#   ./validate.sh --only <case>          # run ONE case standalone (see ALL_CASES below)
+#   ./validate.sh --cleanup --only <case>  # tear down ONE case's resources only
 #
 # Note: when an assertion FAILS the script intentionally LEAVES state behind so
 # you can poke at it (`kubectl -n examples ...`). Run `./validate.sh --cleanup`
@@ -69,7 +71,10 @@ render() {
       -e "s|\${EXTERNAL_HOST_1}|${EXTERNAL_HOSTS[0]:-}|g" \
       -e "s|\${EXTERNAL_HOST_2}|${EXTERNAL_HOSTS[1]:-${EXTERNAL_HOSTS[0]:-}}|g" \
       -e "s|\${INTERNAL_HOST_1}|${INTERNAL_HOSTS[0]:-}|g" \
-      -e "s|\${INTERNAL_HOST_2}|${INTERNAL_HOSTS[1]:-${INTERNAL_HOSTS[0]:-}}|g" "$1"
+      -e "s|\${INTERNAL_HOST_2}|${INTERNAL_HOSTS[1]:-${INTERNAL_HOSTS[0]:-}}|g" \
+      -e "s|\${MULTI_HOST_1}|${MULTI_HOSTS[0]:-}|g" \
+      -e "s|\${MULTI_HOST_2}|${MULTI_HOSTS[1]:-}|g" \
+      -e "s|\${MULTI_HOST_3}|${MULTI_HOSTS[2]:-}|g" "$1"
 }
 
 resolve_config() {
@@ -85,15 +90,28 @@ resolve_config() {
   # Hostname lists come comma-joined from the fop outputs (multi-host, ADR-0005).
   IFS=',' read -r -a EXTERNAL_HOSTS <<<"${EXTERNAL_HOSTNAMES:-$(tf_out external_hostnames)}"
   IFS=',' read -r -a INTERNAL_HOSTS <<<"${INTERNAL_HOSTNAMES:-$(tf_out internal_hostnames)}"
+  # The multi-subdomain case (14) owns the sdN.* entries of the external list;
+  # the first two entries stay with case 05. Override with a comma-joined
+  # MULTI_SUBDOMAIN_HOSTNAMES if the convention ever changes.
+  local h
+  MULTI_HOSTS=()
+  if [[ -n "${MULTI_SUBDOMAIN_HOSTNAMES:-}" ]]; then
+    IFS=',' read -r -a MULTI_HOSTS <<<"${MULTI_SUBDOMAIN_HOSTNAMES}"
+  else
+    for h in "${EXTERNAL_HOSTS[@]}"; do
+      [[ "${h}" == sd[0-9]* ]] && MULTI_HOSTS+=("${h}")
+    done
+  fi
   EXTERNAL_IP="${EXTERNAL_IP:-$(tf_out external_gateway_ip)}"
   INTERNAL_IP="${INTERNAL_IP:-$(tf_out internal_gateway_ip)}"
   BACKUP_PLAN="${BACKUP_PLAN:-$(tf_out backup_plan_name)}"
   RESTORE_PLAN="${RESTORE_PLAN:-$(tf_out restore_plan_name)}"
   LOCATION="${LOCATION:-$(tf_out location)}"
   log "Config"
-  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)\n  internal=%s (%s)\n  backup-plan=%s restore-plan=%s\n' \
+  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)\n  multi-subdomain=%s\n  internal=%s (%s)\n  backup-plan=%s restore-plan=%s\n' \
     "${PROJECT_ID}" "${CLUSTER}" "${REGISTRY_PROXY}" \
-    "${EXTERNAL_HOSTS[*]:-?}" "${EXTERNAL_IP:-?}" "${INTERNAL_HOSTS[*]:-?}" "${INTERNAL_IP:-?}" \
+    "${EXTERNAL_HOSTS[*]:-?}" "${EXTERNAL_IP:-?}" "${MULTI_HOSTS[*]:-?}" \
+    "${INTERNAL_HOSTS[*]:-?}" "${INTERNAL_IP:-?}" \
     "${BACKUP_PLAN:-?}" "${RESTORE_PLAN:-?}"
 }
 
@@ -235,9 +253,11 @@ check_external_ingress() {
   # validates by SNI (no -k), so this also proves per-host certificates
   # (ADR-0005). The global load balancer takes minutes to program its HTTPS
   # frontend after the certs go ACTIVE, so retry until every host serves.
+  # Only the FIRST TWO external hostnames belong to this case's route — the
+  # sdN.* entries are claimed by the multi-subdomain route (case 14) instead.
   log "  waiting for the external load balancer to program (up to ~6 min)..."
   local host code="" failed="" attempt
-  for host in "${EXTERNAL_HOSTS[@]}"; do
+  for host in "${EXTERNAL_HOSTS[@]:0:2}"; do
     code=""
     for attempt in $(seq 1 18); do
       code="$(curl -sS --max-time 15 --resolve "${host}:443:${EXTERNAL_IP}" \
@@ -250,9 +270,57 @@ check_external_ingress() {
     fi
   done
   if [[ -z "${failed}" ]]; then
-    record PASS external-ingress "HTTPS 200 + 'Hello World' with per-host publicly-trusted certs at: ${EXTERNAL_HOSTS[*]}"
+    record PASS external-ingress "HTTPS 200 + 'Hello World' with per-host publicly-trusted certs at: ${EXTERNAL_HOSTS[*]:0:2}"
   else
     record FAIL external-ingress "${failed}($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 80)); LB programmed? certs ACTIVE?"
+  fi
+}
+
+check_multi_subdomain() {
+  log "14 — multi-subdomain routing (3 subdomains x 2 services, fanned out by path)"
+  if [[ -z "${EXTERNAL_IP}" ]]; then
+    record SKIP multi-subdomain "EXTERNAL_IP not set (terraform output external_gateway_ip)"
+    return
+  fi
+  if (( ${#MULTI_HOSTS[@]} < 3 )); then
+    record SKIP multi-subdomain "needs 3 sdN.* hostnames in external_hostnames (found ${#MULTI_HOSTS[@]})"
+    return
+  fi
+  render "${SCRIPT_DIR}/11-multi-subdomain/ingress.yaml" | kubectl apply -f -
+  local svc
+  for svc in helloworld1 helloworld2; do
+    if ! kubectl -n public-services rollout status "deploy/${svc}" --timeout=180s >/dev/null; then
+      record FAIL multi-subdomain "${svc} did not become ready"
+      return
+    fi
+  done
+  # Assert the full 3x2 matrix: every subdomain routes /h1 to helloworld1 and
+  # /h2 to helloworld2, each response NAMES the service and the subdomain it
+  # was reached through, and each host's own public cert validates (no -k,
+  # --resolve pins the IP so DNS propagation stays off the critical path).
+  # The first probe absorbs the LB programming wait; later ones hit a
+  # programmed frontend and pass on their first attempt.
+  log "  waiting for the external load balancer to program (up to ~6 min)..."
+  local host path expect code="" failed="" attempt
+  for host in "${MULTI_HOSTS[@]:0:3}"; do
+    for path in /h1 /h2; do
+      expect="service=helloworld${path#/h} host=${host}"
+      code=""
+      for attempt in $(seq 1 18); do
+        code="$(curl -sS --max-time 15 --resolve "${host}:443:${EXTERNAL_IP}" \
+          -o /tmp/msd_body -w '%{http_code}' "https://${host}${path}" 2>/tmp/msd_err || true)"
+        [[ "${code}" == "200" ]] && grep -q "${expect}" /tmp/msd_body 2>/dev/null && break
+        sleep 20
+      done
+      if [[ "${code}" != "200" ]] || ! grep -q "${expect}" /tmp/msd_body 2>/dev/null; then
+        failed+="${host}${path}=HTTP'${code}' "
+      fi
+    done
+  done
+  if [[ -z "${failed}" ]]; then
+    record PASS multi-subdomain "all 6 host+path combinations served: /h1->helloworld1, /h2->helloworld2 on ${MULTI_HOSTS[*]:0:3}, each echoing its own subdomain, per-host certs valid"
+  else
+    record FAIL multi-subdomain "${failed}($(tr -d '\n' </tmp/msd_err 2>/dev/null | tail -c 80)); LB programmed? certs ACTIVE?"
   fi
 }
 
@@ -393,7 +461,6 @@ stop_internal_probe() {
   echo "${total} ${failures}"
 }
 
-DRAINED_NODE=""
 check_drain_survival() {
   log "07 — drain survival (zero failed requests while a node drains)"
   if [[ -z "${INTERNAL_IP}" || -z "${INTERNAL_HOSTS[0]:-}" ]]; then
@@ -409,7 +476,6 @@ check_drain_survival() {
     record FAIL drain-survival "no hello-web pod found in ${PROBE_NS} (run 06 first)"; return
   fi
   start_internal_probe "${node}"   # keep the prober OFF the node we're draining
-  DRAINED_NODE="${node}"
   # --force: earlier cases leave throwaway NAKED pods (pvc-writer,
   # wi-secret-reader) that drain refuses to touch otherwise; PDBs of managed
   # pods are still honored — which is exactly what this case tests. 360s gives
@@ -417,7 +483,7 @@ check_drain_survival() {
   if ! kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data --force \
       --timeout=360s >/tmp/drain.log 2>&1; then
     stop_internal_probe >/dev/null
-    kubectl uncordon "${node}" >/dev/null 2>&1 || true; DRAINED_NODE=""
+    kubectl uncordon "${node}" >/dev/null 2>&1 || true
     record FAIL drain-survival "drain of ${node} failed: $(tail -1 /tmp/drain.log | tr -d '\n' | tail -c 140)"
     return
   fi
@@ -426,7 +492,6 @@ check_drain_survival() {
   local total failures
   read -r total failures < <(stop_internal_probe)
   kubectl uncordon "${node}" >/dev/null 2>&1 || true
-  DRAINED_NODE=""
   if (( total > 0 && failures == 0 )); then
     record PASS drain-survival "node ${node} drained; ${total} internal requests, 0 failures"
   else
@@ -644,6 +709,7 @@ do_cleanup() {
   # the namespaces (the cluster stack owns those).
   render "${SCRIPT_DIR}/05-external-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
   render "${SCRIPT_DIR}/06-internal-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
+  render "${SCRIPT_DIR}/11-multi-subdomain/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
   kubectl -n internal-tools delete pod ingress-test --ignore-not-found 2>/dev/null || true
   kubectl -n internal-tools delete pod ha-probe --ignore-not-found 2>/dev/null || true
   gcloud iam service-accounts delete "${WI_GSA}" --project "${PROJECT_ID}" --quiet 2>/dev/null || true
@@ -661,11 +727,38 @@ do_cleanup() {
   fi
 }
 
-# --cleanup mode: just tear down (resolve + connect, then delete).
+# Case-scoped teardown for `--cleanup --only <case>` (and the auto-clean after
+# a successful `--only` run): remove only what THAT case deployed, leaving the
+# rest of the cluster untouched. Cases whose footprint is the shared examples
+# namespace fall back to the full teardown — their objects are not separable
+# from the namespace lifecycle.
+cleanup_case() {
+  case "$1" in
+    external-ingress)
+      render "${SCRIPT_DIR}/05-external-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true ;;
+    multi-subdomain)
+      render "${SCRIPT_DIR}/11-multi-subdomain/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true ;;
+    internal-ingress)
+      render "${SCRIPT_DIR}/06-internal-ingress/ingress.yaml" | kubectl delete --ignore-not-found -f - 2>/dev/null || true
+      kubectl -n internal-tools delete pod ingress-test --ignore-not-found 2>/dev/null || true ;;
+    drain-survival|rolling-deploy)
+      kubectl -n internal-tools delete pod ha-probe --ignore-not-found 2>/dev/null || true ;;
+    *)
+      do_cleanup ;;
+  esac
+}
+
+# --cleanup mode: just tear down (resolve + connect, then delete). With
+# --only, tear down that one case; otherwise everything.
 cleanup() {
   resolve_config
   connect
-  do_cleanup
+  if [[ -n "${1:-}" ]]; then
+    log "Tearing down case: $1"
+    cleanup_case "$1"
+  else
+    do_cleanup
+  fi
   log "Done"
 }
 
@@ -682,41 +775,97 @@ summary() {
   return "${failed}"
 }
 
-main() {
-  # Default: auto-clean on success. --keep leaves state for inspection even on
-  # success; --cleanup is the standalone teardown mode (no checks).
-  local auto_cleanup=1
-  case "${1:-}" in
-    --cleanup) cleanup; exit 0 ;;
-    --keep)    auto_cleanup=0 ;;
-    "")        : ;;
-    *) die "unknown flag: $1 (use --keep or --cleanup)" ;;
+# Run order. multi-subdomain runs right after external-ingress (both wait on
+# the same public edge, so the LB programs them back to back); backup-restore
+# stays LAST because the restore bounces the workload namespaces. Table
+# numbers in README.md label the cases; this array is the execution order.
+ALL_CASES=(hello-web encrypted-pvc artifact-registry workload-identity
+  external-ingress multi-subdomain internal-ingress drain-survival
+  rolling-deploy regional-pvc node-autoscale hpa preemption backup-restore)
+
+run_case() {
+  case "$1" in
+    hello-web)         check_hello_web ;;
+    encrypted-pvc)     check_encrypted_pvc ;;
+    artifact-registry) check_artifact_registry ;;
+    workload-identity) check_workload_identity ;;
+    external-ingress)  check_external_ingress ;;
+    multi-subdomain)   check_multi_subdomain ;;
+    internal-ingress)  check_internal_ingress ;;
+    drain-survival)    check_drain_survival ;;
+    rolling-deploy)    check_rolling_deploy ;;
+    regional-pvc)      check_regional_pvc ;;
+    node-autoscale)    check_node_autoscale ;;
+    hpa)               check_hpa ;;
+    preemption)        check_preemption ;;
+    backup-restore)    check_backup_restore ;;
+    *) die "unknown case: $1 (known: ${ALL_CASES[*]})" ;;
   esac
+}
+
+# Which cases deploy into the shared `examples` namespace (vs the platform
+# ingress namespaces) — drives whether a standalone run needs the namespace
+# and the Workload Identity scaffolding at all.
+case_uses_examples_ns() {
+  case "$1" in
+    hello-web|encrypted-pvc|artifact-registry|workload-identity|regional-pvc|node-autoscale|hpa|preemption|backup-restore) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+main() {
+  # Default: run everything, auto-clean on success. --keep leaves state for
+  # inspection even on success; --cleanup is the standalone teardown mode (no
+  # checks); --only <case> scopes a run OR a teardown to one case.
+  local auto_cleanup=1 do_teardown=0 only=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cleanup) do_teardown=1; shift ;;
+      --keep)    auto_cleanup=0; shift ;;
+      --only)
+        only="${2:-}"
+        [[ -n "${only}" ]] || die "--only needs a case name (one of: ${ALL_CASES[*]})"
+        shift 2 ;;
+      *) die "unknown flag: $1 (use --keep, --cleanup, or --only <case>)" ;;
+    esac
+  done
+  if [[ -n "${only}" ]]; then
+    local known=0 c
+    for c in "${ALL_CASES[@]}"; do [[ "${c}" == "${only}" ]] && known=1; done
+    (( known )) || die "unknown case: ${only} (known: ${ALL_CASES[*]})"
+  fi
+  if (( do_teardown )); then
+    cleanup "${only}"
+    exit 0
+  fi
 
   resolve_config
   connect
-  ensure_namespace
-  setup_wi_prereqs
-  check_hello_web
-  check_encrypted_pvc
-  check_artifact_registry
-  check_workload_identity
-  check_external_ingress
-  check_internal_ingress
-  check_drain_survival
-  check_rolling_deploy
-  check_regional_pvc
-  check_node_autoscale
-  check_hpa
-  check_preemption
-  check_backup_restore
+  if [[ -z "${only}" ]] || case_uses_examples_ns "${only}"; then
+    ensure_namespace
+  fi
+  # The WI scaffolding is only consumed by the workload-identity case; skip
+  # the gcloud churn when a standalone run doesn't need it.
+  if [[ -z "${only}" || "${only}" == "workload-identity" ]]; then
+    setup_wi_prereqs
+  fi
+
+  local case_name
+  for case_name in "${ALL_CASES[@]}"; do
+    if [[ -z "${only}" || "${case_name}" == "${only}" ]]; then
+      run_case "${case_name}"
+    fi
+  done
 
   if summary; then
-    if (( auto_cleanup )); then
+    if (( auto_cleanup )) && [[ -n "${only}" ]]; then
+      cleanup_case "${only}"
+      log "Case '${only}' passed. Its state is cleaned."
+    elif (( auto_cleanup )); then
       do_cleanup
       log "All examples passed — the cluster is ready for workloads (WLD-2). State cleaned."
     else
-      log "All examples passed — the cluster is ready for workloads (WLD-2). State left for inspection (--keep)."
+      log "All examples passed — state left for inspection (--keep)."
     fi
     exit 0
   else
