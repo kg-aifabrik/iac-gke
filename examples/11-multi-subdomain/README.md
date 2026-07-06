@@ -30,13 +30,19 @@ three names as Subject Alternative Names (SANs) was considered and rejected —
 per-hostname certificates so hostnames can be added/removed independently and
 no certificate ever lists names it does not serve.
 
-Diagrams (open with [excalidraw.com](https://excalidraw.com) or the VS Code
-Excalidraw extension):
+Diagrams (PNG renders below; the editable sources are the `.excalidraw` files
+next to them — open with [excalidraw.com](https://excalidraw.com) or the
+VS Code Excalidraw extension):
 
-- [`configuration.excalidraw`](configuration.excalidraw) — how the pieces are
-  provisioned and wired (Terraform → Google resources → in-cluster objects).
-- [`traffic-flow.excalidraw`](traffic-flow.excalidraw) — the request path from
-  the client to the pod, step by step.
+**Configuration** — how the pieces are provisioned and wired (Terraform →
+Google resources → in-cluster objects) ([source](configuration.excalidraw)):
+
+![Configuration](configuration.png)
+
+**Traffic flow** — the request path from the client to the pod, step by step
+([source](traffic-flow.excalidraw)):
+
+![Traffic flow](traffic-flow.png)
 
 ## How it is configured — the Google ecosystem parts
 
