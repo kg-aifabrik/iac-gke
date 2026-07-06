@@ -293,8 +293,15 @@ terraform -chdir=terraform/envs/dev/fop init -backend-config="bucket=${PROJECT_I
 terraform -chdir=terraform/envs/dev/fop output public_zone_name_servers
 # Add NS records for the public subdomain (host `dev` in `arthos.app`) pointing at
 # those four nameservers. Certificates then go PROVISIONING → ACTIVE in minutes.
-dig NS dev.arthos.app        # expect the Google nameservers
+dig NS dev.arthos.app        # expect EXACTLY the four nameservers printed above
 ```
+
+**Not one-time after a rebuild:** a re-created zone usually gets a *different*
+name-server set, so after any teardown → rebuild the registrar's NS records are
+stale (see step 9's warning). The tell: `dig NS dev.arthos.app` returns
+`SERVFAIL` (or a `ns-cloud-*` set that doesn't match the terraform output) and
+certificates stay `PROVISIONING` with the domain stuck `AUTHORIZING` — fix by
+updating the NS records at the registrar to the four names printed above.
 
 <details><summary>Technical details</summary>
 
@@ -560,6 +567,15 @@ singletons remain (enabled APIs, the node SA, the KMS key shell).
 
 **After teardown:** remove the ingress DNS records you added — the external A
 record now points at a released IP and the DNS-authorization CNAME is moot.
+
+> **⚠️ The NS delegation goes stale on every teardown → rebuild.** Cloud DNS
+> assigns a public zone its name-server set at creation, so a re-created zone
+> almost always lands on a **different** `ns-cloud-*` quartet — and the NS
+> records at the registrar silently keep pointing at the old one, which then
+> answers `REFUSED`. Nothing under the subdomain resolves publicly and every
+> managed certificate sits in `PROVISIONING` forever. On the next bring-up,
+> re-run `terraform output public_zone_name_servers` and update the registrar's
+> NS records to match (step 4's delegation block shows how to diagnose it).
 
 <details><summary>Technical details</summary>
 
