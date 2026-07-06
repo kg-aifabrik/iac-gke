@@ -22,6 +22,7 @@ starting point.
 | 11 | `hpa` | Metric-driven pod scaling | Load drives the Horizontal Pod Autoscaler **past 1 replica** (CPU target 30%) |
 | 12 | `preemption` | The platform priority tiers | With the cluster saturated at the default tier, a **workload-high pod still schedules** (preemption) |
 | 13 | *(backup→restore)* | Backup for GKE (ADR-0004; runs **last**) | The namespace is **deleted and restored** from an on-demand backup, volume data intact |
+| 14 | `multi-subdomain` | One gateway fans several subdomains out to services by URL path | **HTTPS 200** on all **6** host+path combinations (3 subdomains × `/h1`→helloworld1, `/h2`→helloworld2), each response **naming its service and subdomain**, per-host certs (runs right after 05 — same public-edge warm-up) |
 
 ## Run
 
@@ -36,6 +37,12 @@ script reads its configuration from the `fop` Terraform outputs (override with
 examples/validate.sh           # deploy, assert, auto-clean on success
 examples/validate.sh --keep    # as above, but leave state for inspection
 examples/validate.sh --cleanup # standalone teardown (namespace + WI scaffolding)
+
+# Any single case, standalone (names are the summary-table names, e.g.
+# hello-web, external-ingress, multi-subdomain, backup-restore):
+examples/validate.sh --only multi-subdomain            # run one case, auto-clean
+examples/validate.sh --only multi-subdomain --keep     # run one case, keep state
+examples/validate.sh --cleanup --only multi-subdomain  # tear down one case
 ```
 
 On a **FAIL**, state is left behind on purpose so you can inspect with
@@ -47,12 +54,17 @@ pull. The `encrypted-rwo` StorageClass that example 02 uses is a platform
 default the pipeline applies after a build (rendered by the cluster stack from
 the cluster's CMEK key).
 
-**Ingress + HA cases (05–13)** read their config from the fop outputs
+**Ingress + HA cases (05–14)** read their config from the fop outputs
 (`external_hostnames`, `internal_hostnames`, gateway IPs, `backup_plan_name`,
-`restore_plan_name`); override via the same-named environment variables. Only the **external** case (05) depends on the public edge: it uses
+`restore_plan_name`); override via the same-named environment variables. Only
+the **external** cases (05, 14) depend on the public edge: they use
 `curl --resolve` to the gateway IP (so public **DNS propagation** isn't on the
-critical path) but needs the **managed certs ACTIVE** (NS delegation or per-host
-CNAMEs in place). The **internal** case (06) and the **drain/rolling** cases
+critical path) but need the **managed certs ACTIVE** (NS delegation or per-host
+CNAMEs in place). The external hostname list splits by convention: the first
+two entries belong to case 05, the `sdN.*` entries to case 14 (override the
+latter with `MULTI_SUBDOMAIN_HOSTNAMES`; see
+[11-multi-subdomain/README.md](11-multi-subdomain/README.md) for the full
+configuration walk-through and diagrams). The **internal** case (06) and the **drain/rolling** cases
 (07/08) run from an in-cluster pod, resolving hostnames **by name through the
 private zone** — no IP overrides — and trusting the CAS root via the `cas-root`
 ConfigMap; so they validate node drains and rolling deploys over the **internal**

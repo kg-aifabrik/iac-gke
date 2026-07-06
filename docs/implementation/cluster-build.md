@@ -417,12 +417,14 @@ multi-doc YAML (`incluster_manifests`):
 from an end user's point of view (WLD-2), and the examples double as **compliant reference
 deployments** (non-root, read-only root filesystem, dropped capabilities, seccomp
 `RuntimeDefault`, resource limits, zone spread, PodDisruptionBudgets, priority tiers). It
-deploys **thirteen cases** and asserts the end-to-end outcome, not just that pods start —
+deploys **fourteen cases** and asserts the end-to-end outcome, not just that pods start —
 serving on every hostname over both gateways (internal ones **by name** through the private
-zone), persistence, supply chain, Workload Identity, and the high-availability behaviors:
-drain survival and a rolling deploy with **zero failed requests**, node autoscaling, the
-Horizontal Pod Autoscaler, regional-disk zone failover, priority preemption, and a full
-backup→delete→restore round-trip. The authoritative case matrix lives in
+zone), multi-subdomain routing with per-path service fan-out, persistence, supply chain,
+Workload Identity, and the high-availability behaviors: drain survival and a rolling deploy
+with **zero failed requests**, node autoscaling, the Horizontal Pod Autoscaler,
+regional-disk zone failover, priority preemption, and a full backup→delete→restore
+round-trip. Any case can also run (or tear down) **standalone** via
+`validate.sh --only <case>`. The authoritative case matrix lives in
 [`examples/README.md`](../../examples/README.md) — one source of truth, not duplicated here.
 
 Run at bring-up by an operator (it needs operator-level permissions to create the throwaway
