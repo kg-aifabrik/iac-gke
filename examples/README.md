@@ -60,9 +60,10 @@ the cluster's CMEK key).
 the **external** cases (05, 14) depend on the public edge: they use
 `curl --resolve` to the gateway IP (so public **DNS propagation** isn't on the
 critical path) but need the **managed certs ACTIVE** (NS delegation or per-host
-CNAMEs in place). The external hostname list splits by convention: the first
-two entries belong to case 05, the `sdN.*` entries to case 14 (override the
-latter with `MULTI_SUBDOMAIN_HOSTNAMES`; see
+CNAMEs in place). The external hostname list splits by convention: the `sdN.*` entries belong
+to case 14 and any remaining entries to case 05 — which SKIPs when there are
+none, as on the current dev-fop config (override the case-14 set with
+`MULTI_SUBDOMAIN_HOSTNAMES`; see
 [11-multi-subdomain/README.md](11-multi-subdomain/README.md) for the full
 configuration walk-through and diagrams). The **internal** case (06) and the **drain/rolling** cases
 (07/08) run from an in-cluster pod, resolving hostnames **by name through the

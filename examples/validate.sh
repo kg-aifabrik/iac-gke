@@ -68,8 +68,8 @@ render() {
       -e "s|\${PROJECT_ID}|${PROJECT_ID}|g" \
       -e "s|\${WI_GSA}|${WI_GSA}|g" \
       -e "s|\${SECRET_NAME}|${SECRET_NAME}|g" \
-      -e "s|\${EXTERNAL_HOST_1}|${EXTERNAL_HOSTS[0]:-}|g" \
-      -e "s|\${EXTERNAL_HOST_2}|${EXTERNAL_HOSTS[1]:-${EXTERNAL_HOSTS[0]:-}}|g" \
+      -e "s|\${EXTERNAL_HOST_1}|${CASE05_HOSTS[0]:-}|g" \
+      -e "s|\${EXTERNAL_HOST_2}|${CASE05_HOSTS[1]:-${CASE05_HOSTS[0]:-}}|g" \
       -e "s|\${INTERNAL_HOST_1}|${INTERNAL_HOSTS[0]:-}|g" \
       -e "s|\${INTERNAL_HOST_2}|${INTERNAL_HOSTS[1]:-${INTERNAL_HOSTS[0]:-}}|g" \
       -e "s|\${MULTI_HOST_1}|${MULTI_HOSTS[0]:-}|g" \
@@ -91,8 +91,9 @@ resolve_config() {
   IFS=',' read -r -a EXTERNAL_HOSTS <<<"${EXTERNAL_HOSTNAMES:-$(tf_out external_hostnames)}"
   IFS=',' read -r -a INTERNAL_HOSTS <<<"${INTERNAL_HOSTNAMES:-$(tf_out internal_hostnames)}"
   # The multi-subdomain case (14) owns the sdN.* entries of the external list;
-  # the first two entries stay with case 05. Override with a comma-joined
-  # MULTI_SUBDOMAIN_HOSTNAMES if the convention ever changes.
+  # whatever remains belongs to case 05 (which SKIPs when nothing remains).
+  # Override with a comma-joined MULTI_SUBDOMAIN_HOSTNAMES if the convention
+  # ever changes.
   local h
   MULTI_HOSTS=()
   if [[ -n "${MULTI_SUBDOMAIN_HOSTNAMES:-}" ]]; then
@@ -102,15 +103,25 @@ resolve_config() {
       [[ "${h}" == sd[0-9]* ]] && MULTI_HOSTS+=("${h}")
     done
   fi
+  # Case 05 (external-ingress) owns whatever the multi-subdomain case doesn't.
+  CASE05_HOSTS=()
+  local m matched
+  for h in "${EXTERNAL_HOSTS[@]}"; do
+    matched=0
+    if (( ${#MULTI_HOSTS[@]} > 0 )); then
+      for m in "${MULTI_HOSTS[@]}"; do [[ "${h}" == "${m}" ]] && matched=1; done
+    fi
+    (( matched )) || CASE05_HOSTS+=("${h}")
+  done
   EXTERNAL_IP="${EXTERNAL_IP:-$(tf_out external_gateway_ip)}"
   INTERNAL_IP="${INTERNAL_IP:-$(tf_out internal_gateway_ip)}"
   BACKUP_PLAN="${BACKUP_PLAN:-$(tf_out backup_plan_name)}"
   RESTORE_PLAN="${RESTORE_PLAN:-$(tf_out restore_plan_name)}"
   LOCATION="${LOCATION:-$(tf_out location)}"
   log "Config"
-  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)\n  multi-subdomain=%s\n  internal=%s (%s)\n  backup-plan=%s restore-plan=%s\n' \
+  printf '  project=%s cluster=%s\n  proxy=%s\n  external=%s (%s)\n  case05=%s multi-subdomain=%s\n  internal=%s (%s)\n  backup-plan=%s restore-plan=%s\n' \
     "${PROJECT_ID}" "${CLUSTER}" "${REGISTRY_PROXY}" \
-    "${EXTERNAL_HOSTS[*]:-?}" "${EXTERNAL_IP:-?}" "${MULTI_HOSTS[*]:-?}" \
+    "${EXTERNAL_HOSTS[*]:-?}" "${EXTERNAL_IP:-?}" "${CASE05_HOSTS[*]:-?}" "${MULTI_HOSTS[*]:-?}" \
     "${INTERNAL_HOSTS[*]:-?}" "${INTERNAL_IP:-?}" \
     "${BACKUP_PLAN:-?}" "${RESTORE_PLAN:-?}"
 }
@@ -244,6 +255,10 @@ check_external_ingress() {
     record SKIP external-ingress "EXTERNAL_IP not set (terraform output external_gateway_ip)"
     return
   fi
+  if (( ${#CASE05_HOSTS[@]} == 0 )) || [[ -z "${CASE05_HOSTS[0]:-}" ]]; then
+    record SKIP external-ingress "no external hostnames outside the multi-subdomain set (case 14 covers the public edge)"
+    return
+  fi
   render "${SCRIPT_DIR}/05-external-ingress/ingress.yaml" | kubectl apply -f -
   if ! kubectl -n public-services rollout status deploy/hello-web --timeout=180s >/dev/null; then
     record FAIL external-ingress "deployment did not become ready"
@@ -253,11 +268,11 @@ check_external_ingress() {
   # validates by SNI (no -k), so this also proves per-host certificates
   # (ADR-0005). The global load balancer takes minutes to program its HTTPS
   # frontend after the certs go ACTIVE, so retry until every host serves.
-  # Only the FIRST TWO external hostnames belong to this case's route — the
-  # sdN.* entries are claimed by the multi-subdomain route (case 14) instead.
+  # This case's route claims the (up to two) hostnames NOT owned by the
+  # multi-subdomain route (case 14).
   log "  waiting for the external load balancer to program (up to ~6 min)..."
   local host code="" failed="" attempt
-  for host in "${EXTERNAL_HOSTS[@]:0:2}"; do
+  for host in "${CASE05_HOSTS[@]:0:2}"; do
     code=""
     for attempt in $(seq 1 18); do
       code="$(curl -sS --max-time 15 --resolve "${host}:443:${EXTERNAL_IP}" \
@@ -270,7 +285,7 @@ check_external_ingress() {
     fi
   done
   if [[ -z "${failed}" ]]; then
-    record PASS external-ingress "HTTPS 200 + 'Hello World' with per-host publicly-trusted certs at: ${EXTERNAL_HOSTS[*]:0:2}"
+    record PASS external-ingress "HTTPS 200 + 'Hello World' with per-host publicly-trusted certs at: ${CASE05_HOSTS[*]:0:2}"
   else
     record FAIL external-ingress "${failed}($(tr -d '\n' </tmp/ext_err 2>/dev/null | tail -c 80)); LB programmed? certs ACTIVE?"
   fi

@@ -45,7 +45,7 @@ module "stack" {
 
   # Ingress: public external + private internal (ADR-0005); internal names
   # resolve via the per-environment private zone (ADR-0006).
-  external_hostnames   = ["app.dev.arthos.app", "hello.dev.arthos.app", "sd1.dev.arthos.app", "sd2.dev.arthos.app", "sd3.dev.arthos.app"]
+  external_hostnames   = ["sd1.dev.arthos.app", "sd2.dev.arthos.app", "sd3.dev.arthos.app"]
   internal_hostnames   = ["hello.dev.aifabrik.com", "tools.dev.aifabrik.com"]
   internal_zone_domain = "dev.aifabrik.com"
   manage_public_dns    = true

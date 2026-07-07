@@ -67,10 +67,10 @@ purposes:
 clusters:
   - env: dev
     purpose: fop
-    # sd1..sd3 belong to the multi-subdomain routing example (examples/11);
-    # each gets its own managed cert + DNS records, per ADR-0005.
-    external_hostnames: [app.dev.arthos.app, hello.dev.arthos.app,
-                         sd1.dev.arthos.app, sd2.dev.arthos.app, sd3.dev.arthos.app]
+    # All three belong to the multi-subdomain routing example (examples/11);
+    # each gets its own managed cert + DNS records, per ADR-0005. No other
+    # public hostnames are served right now, so validate.sh case 05 SKIPs.
+    external_hostnames: [sd1.dev.arthos.app, sd2.dev.arthos.app, sd3.dev.arthos.app]
     internal_hostnames: [hello.dev.aifabrik.com, tools.dev.aifabrik.com]
     internal_zone_domain: dev.aifabrik.com
     public_zone_domain: dev.arthos.app
