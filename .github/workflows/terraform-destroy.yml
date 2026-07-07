@@ -124,5 +124,64 @@ jobs:
             echo "No Gateway resources present; nothing to clean."
           fi
 
+      # Before destroying, empty the Backup for GKE plans. The google provider
+      # refuses to delete a backup plan (or restore plan) that still contains
+      # backups/restores (googleapi Error 400 "has nested resources ... set
+      # 'force' to true"), and the daily backup SCHEDULE accrues `sched-*`
+      # backups that neither Terraform nor examples/validate.sh removes — so a
+      # cluster that ran overnight cannot be destroyed until its plan is drained
+      # (observed: run 28883229561, plan dev-fop-daily held three sched-* backups).
+      # Scoped to THIS root's own plan outputs, so other clusters/plans in the
+      # project are never touched. Idempotent: skipped when nothing was built or
+      # the plans are already gone (a re-run after a partial destroy).
+      - name: Empty Backup for GKE plans first (delete accumulated backups/restores)
+        if: github.event.inputs.purpose != 'foundation'
+        env:
+          USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+          # gcloud beta's one-time component install otherwise prompts and hangs
+          # an unattended run; auto-install instead (same as examples/validate.sh).
+          CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+        run: |
+          backup_plan="$(terraform -chdir="$TF_ROOT" output -raw backup_plan_name 2>/dev/null || true)"
+          restore_plan="$(terraform -chdir="$TF_ROOT" output -raw restore_plan_name 2>/dev/null || true)"
+          location="$(terraform -chdir="$TF_ROOT" output -raw location 2>/dev/null || true)"
+          if [ -z "$backup_plan" ] && [ -z "$restore_plan" ]; then
+            echo "No backup/restore plan outputs (nothing built); skipping backup cleanup."
+            exit 0
+          fi
+          if [ -z "$location" ]; then
+            echo "No location output; cannot scope backup cleanup — skipping." >&2
+            exit 0
+          fi
+          # gcloud needs an ACTIVE account (not just ADC) for these calls; activate
+          # the workflow's federated credentials explicitly (see the gateway step).
+          gcloud auth login --cred-file="${GOOGLE_APPLICATION_CREDENTIALS}" --quiet
+          # Restores first: a restore plan cannot be deleted while it holds restores,
+          # and restores reference backups. Then the backups. Every list/delete is
+          # scoped to this root's own plan, so no other cluster's data is at risk.
+          if [ -n "$restore_plan" ]; then
+            restores="$(gcloud beta container backup-restore restores list \
+              --project "${TF_VAR_project_id}" --location "$location" \
+              --restore-plan "$restore_plan" --format='value(name.basename())' 2>/dev/null || true)"
+            for r in $restores; do
+              echo "Deleting restore $r from $restore_plan"
+              gcloud beta container backup-restore restores delete "$r" \
+                --project "${TF_VAR_project_id}" --location "$location" \
+                --restore-plan "$restore_plan" --quiet || true
+            done
+          fi
+          if [ -n "$backup_plan" ]; then
+            backups="$(gcloud beta container backup-restore backups list \
+              --project "${TF_VAR_project_id}" --location "$location" \
+              --backup-plan "$backup_plan" --format='value(name.basename())' 2>/dev/null || true)"
+            for b in $backups; do
+              echo "Deleting backup $b from $backup_plan"
+              gcloud beta container backup-restore backups delete "$b" \
+                --project "${TF_VAR_project_id}" --location "$location" \
+                --backup-plan "$backup_plan" --quiet || true
+            done
+          fi
+          echo "Backup/restore plans drained; Terraform can now delete them."
+
       - name: Destroy
         run: terraform -chdir="$TF_ROOT" destroy -auto-approve -no-color -input=false -lock-timeout=120s

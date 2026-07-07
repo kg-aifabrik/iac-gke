@@ -564,6 +564,12 @@ singletons remain (enabled APIs, the node SA, the KMS key shell).
 - Leftover load balancers or a stuck destroy → the workflow deletes the
   in-cluster Gateways first to release them; if a partial run left orphans, re-run
   the destroy (it's idempotent).
+- `BackupPlan ... has nested resources ... set 'force' to true` → the daily backup
+  schedule accrues backups the plan can't be deleted over. The workflow now
+  **drains the backup and restore plans first**, so just re-run the destroy; a
+  cluster built before this step existed may need a one-time manual drain
+  (`gcloud beta container backup-restore backups list/delete --backup-plan <plan>
+  --location <region>`, scoped to that plan) before the re-run.
 
 **After teardown:** remove the ingress DNS records you added — the external A
 record now points at a released IP and the DNS-authorization CNAME is moot.
@@ -587,6 +593,11 @@ handles it for you:
   resources those depend on. Deleting the cluster first would strand the load
   balancers and block the destroy (#31); this phase is idempotent, so a re-run
   after a partial destroy is safe.
+- **The Backup for GKE plans are drained next** — every backup and restore under
+  this root's own plans is deleted before Terraform runs, because the provider
+  won't delete a plan that still holds backups/restores, and the daily schedule
+  keeps creating them. Scoped to this root's plan outputs, so other clusters in
+  the project are untouched; idempotent on re-run.
 - **The CAS hierarchy is per-cluster** with random-suffixed names, so it's removed
   cleanly and the next apply generates fresh ids — no name collisions on rebuild.
 - **The foundation is left in place.** A `fop` teardown removes only the cluster;
