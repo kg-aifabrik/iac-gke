@@ -31,6 +31,8 @@ locals {
     "certificatemanager.googleapis.com", # public gateway certs (TC-7)
     "privateca.googleapis.com",          # CAS private CA for internal TLS (TC-7)
     "gkebackup.googleapis.com",          # Backup for GKE (ADR-0004)
+    "sqladmin.googleapis.com",           # Cloud SQL for PostgreSQL (ADR-0010)
+    "servicenetworking.googleapis.com",  # Private Service Access peering for private-IP Cloud SQL (ADR-0010)
   ])
 
   # The Compute service agent encrypts node boot/attached disks with our key.

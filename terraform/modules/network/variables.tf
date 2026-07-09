@@ -57,3 +57,15 @@ variable "proxy_only_cidr" {
   type        = string
   default     = "10.2.0.0/23"
 }
+
+variable "enable_private_service_access" {
+  description = "Reserve a Private Service Access range and peer it to servicenetworking so a managed service (Cloud SQL) can be reached on a private IP over this VPC. Off unless a private managed database is used."
+  type        = bool
+  default     = false
+}
+
+variable "private_service_access_prefix_length" {
+  description = "Prefix length of the reserved PSA range. A /16 gives Google's managed services ample room; the block is auto-allocated and must not overlap the node/Pod/Service ranges."
+  type        = number
+  default     = 16
+}

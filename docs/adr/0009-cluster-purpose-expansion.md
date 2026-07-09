@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-06-30
 - **Deciders:** SRE
-- **References:** [google-cloud-design.md §2–3, §10](../designs/google-cloud-design.md);
+- **References:** [google-cloud-design.md §2–3, §11](../designs/google-cloud-design.md);
   [cluster-purpose-expansion.md (TDR)](../designs/cluster-purpose-expansion.md);
   [milestone-1-cluster-factory.md](../plans/milestone-1-cluster-factory.md); ADR-0006, ADR-0007
 

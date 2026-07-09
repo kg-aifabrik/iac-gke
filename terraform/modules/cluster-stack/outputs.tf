@@ -86,6 +86,21 @@ output "public_zone_name_servers" {
   value       = module.dns.public_zone_name_servers
 }
 
+output "cloud_sql_instance_name" {
+  description = "Cloud SQL instance name (with random suffix), or null when the cluster has no database."
+  value       = one(module.cloud_sql[*].instance_name)
+}
+
+output "cloud_sql_connection_name" {
+  description = "Cloud SQL connection name (project:region:instance) for the Cloud SQL Auth Proxy, or null when disabled."
+  value       = one(module.cloud_sql[*].connection_name)
+}
+
+output "cloud_sql_private_ip" {
+  description = "Private IP the Cloud SQL instance is reachable at over the VPC, or null when disabled."
+  value       = one(module.cloud_sql[*].private_ip_address)
+}
+
 output "backup_plan_name" {
   description = "Backup for GKE plan name (null when backup is disabled) — used by the validation suite for on-demand backups."
   value       = var.enable_backup ? module.backup[0].backup_plan_name : null

@@ -78,10 +78,36 @@ the Milestone 0 check isn't tripped before the roles actually change.
 - **Proxy-only subnet** — a regional `REGIONAL_MANAGED_PROXY` subnet (`enable_proxy_only_subnet`),
   required by the internal regional Application Load Balancer (the internal gateway) for its
   managed Envoy proxies. Created only when a cluster fronts an internal gateway.
+- **Private Service Access** — optional (`enable_private_service_access`, default off; turned on
+  by `cluster-stack` when the cluster hosts a private database). Reserves an internal
+  `VPC_PEERING` range (`google_compute_global_address`) and peers it to `servicenetworking`
+  (`google_service_networking_connection`), so a managed service on a private IP (Cloud SQL) is
+  reachable over this VPC. Outputs the connection so the `cloud-sql` module orders after it.
 
 Outputs the network/subnet and the `pods`/`services` range names the cluster's IP
 allocation policy references. (Restricted-VIP private DNS for VPC Service Controls is a
 future hardening, not built here — Private Google Access suffices for the cluster to work.)
+
+## Database (Cloud SQL) — `terraform/modules/cloud-sql`
+
+Opt-in per purpose (`enable_cloud_sql` in `config/clusters.yaml`; ADR-0010). `cluster-stack`
+turns on the network's Private Service Access and instantiates this module `depends_on` the
+network so the peering exists first.
+
+- **Instance** — `google_sql_database_instance`, `POSTGRES_16`, **private IP only**
+  (`ipv4_enabled = false` on the VPC), so nothing traverses the public internet. Dev is `ZONAL`
+  with Google-managed encryption and backups off; the name carries a random suffix (as
+  `private-ca` does) so a teardown/rebuild dodges Cloud SQL's week-long name reservation.
+- **IAM database authentication** — the `cloudsql.iam_authentication` flag is set on; callers
+  connect through the Cloud SQL Auth Proxy as their Workload Identity, so there is no password.
+- **Databases** — `temporal` and `temporal_visibility` (`google_sql_database` × 2).
+- **What this module does NOT do** — the per-workload IAM database user, the `cloudsql.client`
+  grant, and the Workload Identity binding are created at deploy time by the workload (they name
+  the workload's Kubernetes service account), keeping this a generic infra module. `sqladmin` and
+  `servicenetworking` are enabled in the foundation; the build role set gains `roles/cloudsql.admin`
+  and `roles/servicenetworking.networksAdmin`.
+
+Outputs the instance name, the connection name (for the Auth Proxy), and the private IP.
 
 ## GKE cluster — `terraform/modules/gke-cluster`
 

@@ -399,23 +399,33 @@ capture Kubernetes state *and* volume data together.
   alive past the daily cron, and a plan still holding backups cannot be deleted — is future
   work (issue #47).
 
-## 10. Build order
+## 10. Database (Cloud SQL, opt-in)
 
-1. Project → enable services → force-create the service agents.
+Purposes that host a stateful platform service (today the Fleet Operations Plane, which runs Temporal) get a **managed PostgreSQL on a private IP** — never a public endpoint, and no stored password (ADR-0010).
+
+- **Private IP via Private Service Access (PSA)** — the `network` module reserves an internal range and peers it to `servicenetworking` (behind `enable_private_service_access`, on only when a database is used); the instance is created with `ipv4_enabled = false` on that VPC, so traffic never leaves Google's network.
+- **IAM database authentication** — the instance enables `cloudsql.iam_authentication`; workloads connect through the Cloud SQL Auth Proxy as their Workload Identity, so there is no database password to store or rotate. The per-workload IAM user + `cloudsql.client` grant + Workload Identity binding are created at deploy time, not by the generic infra module.
+- **Opt-in per purpose** — `config/clusters.yaml` turns it on with `enable_cloud_sql: true`; the generator emits the input only for opted-in clusters, so a database-less cluster provisions nothing extra. Two databases are created: `temporal` and `temporal_visibility`.
+- **Dev posture** — ZONAL (no standby), Google-managed encryption, backups off, and a random-suffixed instance name so a teardown/rebuild dodges Cloud SQL's week-long name reservation. Production sizes up, sets `availability_type = REGIONAL` (the only replication Temporal can use), and adds CMEK.
+
+## 11. Build order
+
+1. Project → enable services (incl. `sqladmin`, `servicenetworking`) → force-create the service agents.
 2. KMS key ring + key → the two key grants.
 3. Node service account and its roles.
-4. VPC → subnet + secondary ranges → Private Google Access / DNS (Cloud NAT if needed); proxy-only subnet for internal gateways.
-5. Artifact Registry (+ reader grant) and the Binary Authorization policy.
-6. Cluster (regional, private, hardened, Workload Identity, our key, Dataplane V2) → fleet membership.
-7. Node pools (general; Confidential if requested).
-8. Connect Gateway access (IAM + in-cluster roles).
-9. Certificate Authority Service (in the foundation, step 1-3 territory — it persists across cluster rebuilds): pools + root + per-environment subordinate; grant cert-manager's identity the certificate-requester role.
-10. In-cluster platform add-ons: cert-manager + `google-cas-issuer` + `trust-manager`.
-11. Gateways: internal (`gke-l7-rilb`, multi-SAN CAS cert) and external (global external, per-host Certificate Manager certs + Cloud Armor + SSL policy + static IP); HTTPRoutes per namespace.
-12. DNS: the private zone + per-host records for the internal gateway (the public zone only when `manage_public_dns` is on).
-13. Backup for GKE: agent, the CMEK key grant for its service agent, and the backup + restore plans.
+4. VPC → subnet + secondary ranges → Private Google Access / DNS (Cloud NAT if needed); proxy-only subnet for internal gateways; Private Service Access range + peering when the cluster hosts a private database.
+5. Cloud SQL (opt-in): the private-IP PostgreSQL instance + its databases on the PSA peering (ADR-0010).
+6. Artifact Registry (+ reader grant) and the Binary Authorization policy.
+7. Cluster (regional, private, hardened, Workload Identity, our key, Dataplane V2) → fleet membership.
+8. Node pools (general; Confidential if requested).
+9. Connect Gateway access (IAM + in-cluster roles).
+10. Certificate Authority Service (in the foundation, step 1-3 territory — it persists across cluster rebuilds): pools + root + per-environment subordinate; grant cert-manager's identity the certificate-requester role.
+11. In-cluster platform add-ons: cert-manager + `google-cas-issuer` + `trust-manager`.
+12. Gateways: internal (`gke-l7-rilb`, multi-SAN CAS cert) and external (global external, per-host Certificate Manager certs + Cloud Armor + SSL policy + static IP); HTTPRoutes per namespace.
+13. DNS: the private zone + per-host records for the internal gateway (the public zone only when `manage_public_dns` is on).
+14. Backup for GKE: agent, the CMEK key grant for its service agent, and the backup + restore plans.
 
-## 11. Decisions, in brief
+## 12. Decisions, in brief
 
 - **One project per environment** — clean isolation, cost, and blast-radius boundary.
 - **No public control-plane endpoint; DNS-based private endpoint + Connect Gateway** — nothing reaches the API over the internet.
@@ -434,8 +444,9 @@ capture Kubernetes state *and* volume data together.
 - **Multi-host gateways, no wildcard certs** — per-host public certs picked by SNI; one explicit multi-SAN CAS leaf internally.
 - **Cloud DNS private zone for internal names; public DNS manual with an opt-in zone** — internal resolution is platform-owned; no in-cluster DNS controller.
 - **Cluster purposes expand by config, not new code (ADR-0009)** — a registry (`config/clusters.yaml`) plus the `tools/cluster-factory` generator renders each per-`(env,purpose)` Terraform root and regenerates the pipeline's `env`/`purpose` inputs; adding a purpose is a config edit followed by `bootstrap/add-cluster-purpose.sh`. `env` is a fixed set (`dev`/`stage`/`prod`); `purpose` is the open axis.
+- **Managed PostgreSQL on a private IP, IAM auth, opt-in per purpose (ADR-0010)** — a stateful platform service (Temporal) gets Cloud SQL over Private Service Access with no public endpoint and no stored password; clusters that don't need a database provision nothing extra.
 
-## 12. Open items
+## 13. Open items
 
 **Resolved at the Milestone 1 build:** the **control-plane DNS endpoint** is confirmed working on
 GKE **1.35.3-gke.2190000** (the cluster was reached over Connect Gateway); **Binary
@@ -458,7 +469,7 @@ CAS root). Still open:
   teardown — no backups remained; the destroy-path purge is issue #47); the preemption validation accounts for the autoscaler adding a node before
   preemption fires.
 
-## 13. Related
+## 14. Related
 
 [requirements.md](../requirements.md) · [technology-choices.md](../technology-choices.md) · [security-requirements.md](../security-requirements.md).
 

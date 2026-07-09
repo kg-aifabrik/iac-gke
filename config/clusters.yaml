@@ -55,6 +55,8 @@ purposes:
     general_autoscaling:
       min_per_zone: 1
       max_per_zone: 2
+    enable_cloud_sql: true        # Temporal's state store — private-IP Cloud SQL (ADR-0010)
+    cloud_sql_tier: db-custom-1-3840   # dev sizing: 1 vCPU / 3.75 GB
   mgmt:                           # Management Plane — external, customer-facing (same shape as fop)
     general_machine_type: e2-medium
     general_autoscaling:

@@ -81,6 +81,26 @@ variable "enable_cloud_nat" {
   default     = false
 }
 
+# --- Database (Cloud SQL) — opt-in per purpose (ADR-0010) -------------------
+
+variable "enable_cloud_sql" {
+  description = "Provision a private-IP Cloud SQL for PostgreSQL instance for this cluster (e.g. Temporal's state store) and the Private Service Access peering it needs. Off by default; turned on per purpose in the registry."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_sql_tier" {
+  description = "Machine tier for the Cloud SQL instance (db-custom-1-3840 in dev; larger in prod). Only used when enable_cloud_sql is true."
+  type        = string
+  default     = "db-custom-1-3840"
+}
+
+variable "cloud_sql_databases" {
+  description = "Databases created on the Cloud SQL instance (defaults to Temporal's core + visibility stores)."
+  type        = list(string)
+  default     = ["temporal", "temporal_visibility"]
+}
+
 # --- Cluster shape (per environment, per purpose) ---------------------------
 
 variable "node_locations" {

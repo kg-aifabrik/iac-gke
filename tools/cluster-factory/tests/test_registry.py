@@ -58,7 +58,9 @@ def test_dev_fop_effective_config_matches_the_handwritten_fop_root():
     assert eff["deletion_protection"] is False
     assert eff["enable_cloud_nat"] is True
     assert eff["manage_public_dns"] is True
-    assert eff["external_hostnames"] == ["app.dev.arthos.app", "hello.dev.arthos.app"]
+    assert eff["enable_cloud_sql"] is True
+    assert eff["cloud_sql_tier"] == "db-custom-1-3840"
+    assert eff["external_hostnames"] == ["sd1.dev.arthos.app", "sd2.dev.arthos.app", "sd3.dev.arthos.app"]
     assert eff["internal_hostnames"] == ["hello.dev.aifabrik.com", "tools.dev.aifabrik.com"]
     assert eff["internal_zone_domain"] == "dev.aifabrik.com"
     assert eff["public_zone_domain"] == "dev.arthos.app"

@@ -68,3 +68,25 @@ resource "google_compute_subnetwork" "proxy_only" {
   purpose       = "REGIONAL_MANAGED_PROXY"
   role          = "ACTIVE"
 }
+
+# Private Service Access — a reserved internal range peered to Google's
+# servicenetworking, so a managed service placed on a private IP (Cloud SQL, §DB)
+# is reachable over this VPC without leaving Google's network. Created only when
+# a private managed database is used. Google auto-allocates a free block of the
+# requested size; the range is immutable once the peering exists.
+resource "google_compute_global_address" "psa" {
+  count         = var.enable_private_service_access ? 1 : 0
+  project       = var.project_id
+  name          = "${var.network_name}-psa"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = var.private_service_access_prefix_length
+  network       = google_compute_network.this.id
+}
+
+resource "google_service_networking_connection" "psa" {
+  count                   = var.enable_private_service_access ? 1 : 0
+  network                 = google_compute_network.this.self_link
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.psa[0].name]
+}

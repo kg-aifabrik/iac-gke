@@ -29,7 +29,7 @@ def test_dev_fop_maps_registry_values_to_setup_doctor_vars():
     assert env["SETUP_DOCTOR_ENVIRONMENT"] == "dev"
     assert env["SETUP_DOCTOR_AUTOSCALING_MIN"] == "1"
     assert env["SETUP_DOCTOR_AUTOSCALING_MAX"] == "2"
-    assert env["SETUP_DOCTOR_EXTERNAL_HOSTNAMES"] == "app.dev.arthos.app,hello.dev.arthos.app"
+    assert env["SETUP_DOCTOR_EXTERNAL_HOSTNAMES"] == "sd1.dev.arthos.app,sd2.dev.arthos.app,sd3.dev.arthos.app"
     assert env["SETUP_DOCTOR_INTERNAL_ZONE_DOMAIN"] == "dev.aifabrik.com"
     assert env["SETUP_DOCTOR_PUBLIC_ZONE_DOMAIN"] == "dev.arthos.app"
 

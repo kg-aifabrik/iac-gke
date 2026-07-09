@@ -39,6 +39,8 @@ module "stack" {
   }
   deletion_protection = false
   enable_cloud_nat    = true
+  enable_cloud_sql    = true
+  cloud_sql_tier      = "db-custom-1-3840"
 
   operator_members  = var.operator_members
   automation_member = var.automation_member

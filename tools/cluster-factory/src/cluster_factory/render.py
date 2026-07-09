@@ -125,6 +125,16 @@ def _render_main(cfg: dict[str, Any]) -> str:
     out += [
         f'  deletion_protection = {_hcl(cfg["deletion_protection"])}',
         f'  enable_cloud_nat    = {_hcl(cfg["enable_cloud_nat"])}',
+    ]
+
+    # Cloud SQL is opt-in per purpose (ADR-0010): emit the inputs only for
+    # clusters that turn it on, so a cluster without a database stays unchanged.
+    if cfg.get("enable_cloud_sql"):
+        out.append(f'  enable_cloud_sql    = {_hcl(True)}')
+        if cfg.get("cloud_sql_tier"):
+            out.append(f'  cloud_sql_tier      = {_hcl(cfg["cloud_sql_tier"])}')
+
+    out += [
         "",
         "  operator_members  = var.operator_members",
         "  automation_member = var.automation_member",

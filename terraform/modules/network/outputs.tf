@@ -35,3 +35,8 @@ output "proxy_only_subnet_id" {
   description = "Full id of the regional proxy-only subnet, or null when not created."
   value       = one(google_compute_subnetwork.proxy_only[*].id)
 }
+
+output "private_service_access_connection" {
+  description = "Id of the Private Service Access peering connection, or null when not enabled. A private managed-service module (cloud-sql) orders after this so the peering exists first."
+  value       = one(google_service_networking_connection.psa[*].id)
+}

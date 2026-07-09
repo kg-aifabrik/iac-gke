@@ -153,6 +153,10 @@ module "network" {
   # The internal gateway is a regional internal ALB, which needs a proxy-only subnet.
   enable_proxy_only_subnet = true
   proxy_only_cidr          = var.proxy_only_cidr
+
+  # Private Service Access is only needed when this cluster hosts a private
+  # managed database (Cloud SQL) — reserve the peering range then.
+  enable_private_service_access = var.enable_cloud_sql
 }
 
 module "supply_chain" {
@@ -197,6 +201,26 @@ module "cluster" {
   enable_confidential_pool  = var.enable_confidential_pool
   confidential_machine_type = var.confidential_machine_type
   confidential_node_count   = var.confidential_node_count
+}
+
+# Cloud SQL for PostgreSQL (e.g. Temporal's state store) — private IP only,
+# reachable over the VPC via the network module's Private Service Access peering.
+# Created only for purposes that opt in (enable_cloud_sql). depends_on the whole
+# network so the PSA peering exists before the instance is placed on it (ADR-0010).
+module "cloud_sql" {
+  source = "../cloud-sql"
+  count  = var.enable_cloud_sql ? 1 : 0
+
+  project_id          = var.project_id
+  region              = var.region
+  instance_name       = "${local.cluster_name}-temporal"
+  network_id          = module.network.network_id
+  tier                = var.cloud_sql_tier
+  databases           = var.cloud_sql_databases
+  deletion_protection = var.deletion_protection
+  labels              = local.labels
+
+  depends_on = [module.network]
 }
 
 # Private CA (CAS) for internal-endpoint TLS — instantiated PER CLUSTER so a
