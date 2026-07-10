@@ -24,7 +24,10 @@ resource "google_sql_database_instance" "this" {
   deletion_protection = var.deletion_protection
 
   settings {
-    tier              = var.tier
+    tier = var.tier
+    # Pin the edition: POSTGRES_16 defaults to ENTERPRISE_PLUS, which only accepts
+    # db-perf-optimized-N-* tiers and would reject the small db-custom-* dev tier.
+    edition           = var.edition
     availability_type = var.availability_type
     disk_size         = var.disk_size_gb
     disk_autoresize   = true

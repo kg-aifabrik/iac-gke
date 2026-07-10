@@ -21,9 +21,15 @@ variable "network_id" {
 }
 
 variable "tier" {
-  description = "Machine tier. Dev uses a small shared tier (db-custom-1-3840 = 1 vCPU / 3.75 GB); production sizes up (see the research repo's Cloud SQL sizing)."
+  description = "Machine tier. Dev uses a small shared tier (db-custom-1-3840 = 1 vCPU / 3.75 GB); production sizes up (see the research repo's Cloud SQL sizing). Must be compatible with edition: ENTERPRISE takes db-custom-*/shared-core tiers, ENTERPRISE_PLUS only db-perf-optimized-N-*."
   type        = string
   default     = "db-custom-1-3840"
+}
+
+variable "edition" {
+  description = "Cloud SQL edition. ENTERPRISE (default) supports the small db-custom-* tiers used in dev; ENTERPRISE_PLUS is the higher-performance tier and requires db-perf-optimized-N-* machines. Set explicitly because POSTGRES_16 otherwise defaults to ENTERPRISE_PLUS, which rejects db-custom-* tiers."
+  type        = string
+  default     = "ENTERPRISE"
 }
 
 variable "database_version" {
